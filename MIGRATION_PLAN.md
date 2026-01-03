@@ -41,6 +41,63 @@ This document outlines the architecture and migration strategy for moving the Ch
 7.  **Auto-Login:** The helper app launches Smart Console and injects the credentials/IP.
 8.  **Result:** User sees the Smart Console connected to their specific Management Server without typing credentials.
 
+### 2.1 AWS Environment Artifacts & User Experience
+**Observed URL Structure (AppStream):**
+The connection process involves a URL transition:
+
+**Phase 1: Reservation (`#/reserve`)**
+Initial request to reserve a session instance.
+```
+https://63a5b2f67a09659106a68182d383d8645f3ccda0e1cf7b76689df1d7.appstream2.us-east-1.aws.amazon.com/#/reserve
+?app=SmartConsole
+&reference=fleet%2FSmartConsoleR82-TF
+&context=o9tGeBss6rykoTPx%2BaPyuJyQJGRdX1MmhvgRbTObQ4%2FLzqLqPMoLjE%2B7%2Fkk6YuZ7cVwT%2BDFgoqTLFXGThZ5yRqjyi%2BSqUVJnY6GNkHGRt5fHoCYxPVp962Z0dyD8w2S0xRF9d4AZ%2Ba%2Bs2779sScYJk4ipQ5AeJyGdTxHEnx176VrcJlkag6rpm97SSezrFwdpqs%2BNBBVZxaOh5c31SoTTGmojvGYvMquRcpdyL5Yb1k%3D
+```
+
+**Phase 2: Streaming (`#/streaming`)**
+Once reserved, the URL changes to the active streaming session.
+```
+https://63a5b2f67a09659106a68182d383d8645f3ccda0e1cf7b76689df1d7.appstream2.us-east-1.aws.amazon.com/#/streaming
+?reference=fleet%2FSmartConsoleR82-TF
+&app=SmartConsole
+&context=o9tGeBss6rykoTPx%2BaPyuJyQJGRdX1MmhvgRbTObQ4%2FLzqLqPMoLjE%2B7%2Fkk6YuZ7cVwT%2BDFgoqTLFXGThZ5yRqjyi%2BSqUVJnY6GNkHGRt5fHoCYxPVp962Z0dyD8w2S0xRF9d4AZ%2Ba%2Bs2779sScYJk4ipQ5AeJyGdTxHEnx176UCrnimIe9Xzlk7aqFB8rlc2JYYHZE2uK18NoFYBg88xhpTrhyfMOc6JSo6zODaGH4%3D
+```
+*   **Domain:** `appstream2.us-east-1.aws.amazon.com` (Confirming AWS AppStream 2.0).
+*   **Fleet:** `SmartConsoleR82-TF` (Indicates the image/fleet name).
+*   **Context:** The large encrypted string containing the session credentials.
+
+**Visual State (Screenshots):**
+> *Note: Screenshots are referenced here. Please upload the image files to the repository to view them.*
+
+1.  **Infinity Portal Dashboard:** Shows the "Smart-1 Cloud" service with an "Open" button.
+    ![Infinity Portal Dashboard](./aws%20screnshots/s1c-image1.png)
+
+2.  **Service Page:** Displays "Open Web SmartConsole" and "Open Streamed SmartConsole".
+    *   Also shows "SmartConsole connection token" (e.g., `roie9876-dejucj4n/c4b83f3f...`).
+    ![Service Page](./aws%20screnshots/s1c-image2.png)
+
+3.  **AppStream Loading:** Browser redirects to the AWS AppStream URL, showing the "SmartConsole R82" splash screen and "Connecting to Smart-1 Cloud" with the user identifier.
+    ![AppStream Loading](./aws%20screnshots/s1c-image3.png)
+
+4.  **Smart Console UI:** The full Windows application running inside the browser window.
+    ![Smart Console UI](./aws%20screnshots/s1c-image4.png)
+
+### 2.2 Technical Analysis of AWS AppStream Flow
+Based on the observed URL transitions, the AWS solution functions as follows:
+
+1.  **The "Push" Mechanism:**
+    *   The presence of the `&context=` parameter confirms that the sensitive session data (User, Password, Target IP) is **pushed** from the client browser to the AppStream instance via the URL.
+    *   The string is Base64 encoded (ending in `%3D` -> `=`) and encrypted.
+
+2.  **Session Lifecycle (Reserve -> Stream):**
+    *   **Step 1: Reservation (`#/reserve`):** The browser requests a session. The `context` here likely acts as a "Reservation Ticket" containing the user's intent.
+    *   **Step 2: Streaming (`#/streaming`):** Once the instance is ready, the URL updates. The `context` string **changes** at this stage. This suggests a token rotation or a handshake where the "Reservation Ticket" is exchanged for a "Session Ticket".
+
+3.  **Implications for Azure:**
+    *   This "Context-in-URL" pattern is specific to AWS AppStream's capability to pass custom parameters to the instance.
+    *   **Azure Virtual Desktop (AVD) Web Client does NOT support this.** We cannot pass a `&context=` parameter in the AVD URL.
+    *   **Conclusion:** We must abandon the "Push" model and implement the **"Pull" model** (described in Section 4), where the application fetches its configuration from the backend after launch.
+
 ---
 
 ## 3. Proposed Architecture (Azure)
@@ -185,6 +242,29 @@ Since AVD Web Client **does not** support a `&context=` parameter in the URL (as
     *   Helper App parses this token to find the Management Server IP and credentials.
     *   Helper App launches Smart Console.
 
+## 10. Context Store Technology Selection (Key Vault vs. Redis)
+
+**Option A: Azure Key Vault**
+*   **Mechanism:**
+    *   Portal writes a Secret: `Name: Session-Roie`, `Value: {EncryptedContext}`.
+    *   AVD reads Secret `Session-Roie`.
+*   **Pros:** Highly secure, built-in encryption.
+*   **Cons (Scale):** Key Vault has **throttling limits** (e.g., 2,000 requests/10 seconds). If 5,000 users log in at 9:00 AM, it will fail. It is designed for *static* secrets, not high-frequency dynamic data.
+
+**Option B: Azure Redis Cache (Recommended)**
+*   **Mechanism:**
+    *   Portal writes Key: `Session:Roie`, Value: `{EncryptedContext}`, TTL: 60s.
+    *   AVD reads Key.
+*   **Pros:**
+    *   **Speed:** Sub-millisecond latency.
+    *   **Scale:** Handles millions of requests per second.
+    *   **TTL:** Built-in "Time To Live" automatically deletes old sessions (perfect for our "Active Launch" logic).
+*   **Security:** Can be secured with Private Endpoints and Access Keys.
+
+**Decision:**
+For the **Proof of Concept (PoC)**, Key Vault is fine and easy to set up.
+For **Production**, we **must use Redis** (or Cosmos DB) to handle the scale of thousands of concurrent users.
+
 ## 8. Handling Multi-Tenancy (MSSP Scenario)
 
 **The Challenge:**
@@ -217,6 +297,32 @@ Since we cannot pass the "Target ID" in the URL, we must rely on the **Time-Base
 
 5.  **Result:**
     *   Smart Console opens for Customer A.
+
+## 11. Context Lifecycle & Concurrency Handling
+
+**The "Temporary" Nature of the Context:**
+The context stored in the backend (Key Vault/Redis) is **transient**. It exists only to bridge the gap between the user's click in the Portal and the application launch in Azure.
+
+**Lifecycle Steps:**
+1.  **Creation:** Triggered by the "Connect" click.
+2.  **Expiration (TTL):** Set to **60 seconds**. If the user closes the browser or the network fails, the key self-destructs to prevent stale data.
+3.  **Consumption & Deletion:**
+    *   The Helper App reads the key.
+    *   **CRITICAL:** The Helper App immediately **deletes** the key after reading.
+    *   **Reason:** Prevents "Replay Attacks" (malicious actors trying to reuse the session) and ensures hygiene.
+
+**Concurrency Scenario (The "Double Click" Problem):**
+*   **Scenario:** User Roie clicks "Connect Customer A", then 2 seconds later clicks "Connect Customer B".
+*   **Behavior:**
+    *   Click 1 sets Key = `Customer A`.
+    *   Click 2 **overwrites** Key = `Customer B`.
+    *   **Result:** Both AVD sessions (if they both launch) will read `Customer B`.
+*   **Verdict:** This "Last Write Wins" behavior is acceptable for this use case. It prevents the user from accidentally connecting to the wrong (old) target.
+
+**Multiple Simultaneous Sessions:**
+*   If Roie connects to Customer A (Session 1 starts, Key deleted).
+*   Then 1 minute later, Roie connects to Customer B (Session 2 starts, New Key created/deleted).
+*   **Result:** Both sessions run in parallel without conflict because the first key was already gone.
 
 **Edge Case: Multiple Tabs?**
 *   If Roie clicks "Connect Customer A" and then immediately clicks "Connect Customer B" in another tab *before* the first session starts, the `ActiveLaunch` key might be overwritten.
