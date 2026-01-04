@@ -39,7 +39,7 @@ This document tracks the state of the Check Point Farm Migration PoC. Use this t
 7.  Updated `LocalPortal/app.py` to handle HTTP 201 responses from Azure.
 8.  Added `/dl` endpoint to Azure Function for easy script download.
 9.  **Verified End-to-End Flow:** Portal -> Azure -> AVD -> Launcher -> App Launch.
-10. **Updated Launcher:** Switched from `notepad.exe` to `SmartConsole.exe` (R81.20 path).
+10. **Updated Launcher:** Switched to `SmartConsole.exe` (R82 path).
 
 ## Immediate Next Steps
 1.  **Verify SmartConsole Launch:** Download the updated script in AVD and run it.

@@ -187,7 +187,7 @@ try {
         
         # Real Implementation:
         # Adjust the path below to match your specific SmartConsole version (e.g., R81.10, R81.20)
-        $SmartConsolePath = "C:\Program Files (x86)\CheckPoint\SmartConsole\R81.20\PROGRAM\SmartConsole.exe"
+        $SmartConsolePath = "C:\Program Files (x86)\CheckPoint\SmartConsole\R82\PROGRAM\SmartConsole.exe"
         
         if (Test-Path $SmartConsolePath) {
             Start-Process $SmartConsolePath -ArgumentList "-p $Password -u $Username -s $TargetIp"
