@@ -82,19 +82,31 @@ https://63a5b2f67a09659106a68182d383d8645f3ccda0e1cf7b76689df1d7.appstream2.us-e
 4.  **Smart Console UI:** The full Windows application running inside the browser window.
     ![Smart Console UI](./aws%20screnshots/s1c-image4.png)
 
-### 2.2 Technical Analysis of AWS AppStream Flow
-Based on the observed URL transitions, the AWS solution functions as follows:
+### 2.2 Technical Analysis of AWS AppStream Flow (Confirmed via Trace)
+Based on the analysis of the network trace (`portal.checkpoint.com.har`), the flow is confirmed as follows:
 
-1.  **The "Push" Mechanism:**
-    *   The presence of the `&context=` parameter confirms that the sensitive session data (User, Password, Target IP) is **pushed** from the client browser to the AppStream instance via the URL.
-    *   The string is Base64 encoded (ending in `%3D` -> `=`) and encrypted.
+1.  **API Call to Infinity Portal:**
+    *   **Request:** `GET https://cloudinfra-gw-us.portal.checkpoint.com/app/maas/api/v1/tenant/<TENANT_ID>/appstream`
+    *   **Headers:** Includes `x-access-token` for authentication.
+    *   **Purpose:** The client asks the backend for a connection URL for the specific Tenant ID (e.g., `8bac9fb5...`).
 
-2.  **Session Lifecycle (Reserve -> Stream):**
-    *   **Step 1: Reservation (`#/reserve`):** The browser requests a session. The `context` here likely acts as a "Reservation Ticket" containing the user's intent.
-    *   **Step 2: Streaming (`#/streaming`):** Once the instance is ready, the URL updates. The `context` string **changes** at this stage. This suggests a token rotation or a handshake where the "Reservation Ticket" is exchanged for a "Session Ticket".
+2.  **Backend Response:**
+    *   **Status:** `200 OK`
+    *   **Body:**
+        ```json
+        {
+          "success": true,
+          "data": "https://appstream2.us-east-1.aws.amazon.com/authenticate?parameters=eyJ0eXBlIjoiRU5EX1VTRVIiLC..."
+        }
+        ```
+    *   **Mechanism:** The backend generates a pre-signed or parameterized URL containing the session context.
 
-3.  **Implications for Azure:**
-    *   This "Context-in-URL" pattern is specific to AWS AppStream's capability to pass custom parameters to the instance.
+3.  **The "Push" Mechanism:**
+    *   The `parameters` query string in the AppStream URL is a Base64 encoded JSON object.
+    *   This JSON contains the sensitive session data (User, Password, Target IP) in an encrypted field named `userContext`.
+    *   **Conclusion:** The sensitive data is **pushed** to the AppStream instance via this URL parameter.
+
+4.  **Implications for Azure:**
     *   **Azure Virtual Desktop (AVD) Web Client does NOT support this.** We cannot pass a `&context=` parameter in the AVD URL.
     *   **Conclusion:** We must abandon the "Push" model and implement the **"Pull" model** (described in Section 4), where the application fetches its configuration from the backend after launch.
 
@@ -257,9 +269,24 @@ This URL acts as the **Tenant Resolver**.
     *   `&app=SmartConsole` (Identifies the Application)
     *   `&context=...` (A massive encrypted string!)
 
-**Analysis of the AWS "Context" Parameter:**
+**Analysis of the AWS "Context" Parameter (Decoded):**
 The `&context=` parameter in the URL is exactly what we suspected. It contains the encrypted payload (User, Pass, IP, Token) that the AppStream instance receives.
-*   **AWS Mechanism:** AppStream passes this `context` string to the instance. A script on the instance reads it, decrypts it, and logs the user in.
+
+**Decoded JSON Structure:**
+```json
+{
+  "type": "END_USER",
+  "expires": "1767507055",
+  "awsAccountId": "888019224369",
+  "userId": "fc6a2e21f83249aeb0bcb8d320cf4cdb",
+  "catalogSource": "stack/SmartConsoleR82-TF",
+  "fleetRef": "fleet/SmartConsoleR82-TF",
+  "applicationId": "SmartConsole",
+  "userContext": "o9tGeBss6rykoTPx+aPyuJyQJGRdX1MmhvgRbTObQ4/LzqLqPMoLjE+7/kk6YuZ7cVwT+DFgoqTLFXGThZ5yRqjyi+SqUVJnY6GNkHGRt5fHoCYxPVp962Z0dyD8w2S0xRF9d4AZ+a+s2779sScYJk4ipQ5AeJyGdTxHEnx176VtCJGWgfvUcn2UyI/Gl9h7Rb533vYdO2E+B9j20Yk/m1wEC/Fiff8YamKSVptXFjo=",
+  "maxUserDurationInSecs": "7200"
+}
+```
+*   **AWS Mechanism:** AppStream passes this `userContext` string to the instance. A script on the instance reads it, decrypts it, and logs the user in.
 
 **Azure Equivalent Strategy (Refined):**
 Since AVD Web Client **does not** support a `&context=` parameter in the URL (as confirmed in Challenge 1), we **cannot** simply copy-paste this URL structure.
