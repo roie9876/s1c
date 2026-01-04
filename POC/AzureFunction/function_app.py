@@ -206,15 +206,14 @@ try {
             # We also include the XML declaration
             
             $XmlContent = @"
-<?xml version="1.0" encoding="utf-8"?>
-<RemoteLaunchParemeters xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+<RemoteLaunchParameters xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
     <Username>$Username</Username>
     <Password>$SafePassword</Password>
     <ServerIP>$TargetIp</ServerIP>
     <DomainName></DomainName>
     <ReadOnly>False</ReadOnly>
     <CloudDemoMode>False</CloudDemoMode>
-</RemoteLaunchParemeters>
+</RemoteLaunchParameters>
 "@
             
             # Use .NET to write file without BOM (Set-Content UTF8 adds BOM which might confuse legacy apps)
