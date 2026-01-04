@@ -74,7 +74,22 @@ try {
         $SmartConsolePath = "C:\Program Files (x86)\CheckPoint\SmartConsole\R82\PROGRAM\SmartConsole.exe"
         
         if (Test-Path $SmartConsolePath) {
-            Start-Process $SmartConsolePath -ArgumentList "-p $Password -u $Username -s $TargetIp"
+            $SCArgs = "-p $Password -u $Username -s $TargetIp"
+            Write-Host "[DEBUG] Executing: $SmartConsolePath $SCArgs" -ForegroundColor DarkGray
+            
+            try {
+                $Process = Start-Process -FilePath $SmartConsolePath -ArgumentList $SCArgs -PassThru
+                Write-Host "[SUCCESS] SmartConsole launched (PID: $($Process.Id))" -ForegroundColor Green
+                
+                # Optional: Wait a bit to see if it crashes immediately
+                Start-Sleep -Seconds 5
+                if ($Process.HasExited) {
+                    Write-Host "[WARNING] SmartConsole exited immediately with code: $($Process.ExitCode)" -ForegroundColor Yellow
+                    Write-Host "Possible causes: Invalid credentials, server unreachable, or fingerprint mismatch." -ForegroundColor Yellow
+                }
+            } catch {
+                Write-Host "[ERROR] Failed to start process: $_" -ForegroundColor Red
+            }
         } else {
             Write-Host "[ERROR] SmartConsole not found at: $SmartConsolePath" -ForegroundColor Red
         }

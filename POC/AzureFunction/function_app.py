@@ -190,7 +190,25 @@ try {
         $SmartConsolePath = "C:\Program Files (x86)\CheckPoint\SmartConsole\R82\PROGRAM\SmartConsole.exe"
         
         if (Test-Path $SmartConsolePath) {
-            Start-Process $SmartConsolePath -ArgumentList "-p $Password -u $Username -s $TargetIp"
+            # Use -PassThru to get the process object so we can check if it exits immediately
+            $SCArgs = "-p `"$Password`" -u `"$Username`" -s `"$TargetIp`""
+            Write-Host "[DEBUG] Launching with args: $SCArgs" -ForegroundColor Cyan
+            
+            try {
+                $Process = Start-Process -FilePath $SmartConsolePath -ArgumentList $SCArgs -PassThru
+                
+                # Wait a few seconds to see if it crashes immediately
+                Start-Sleep -Seconds 5
+                
+                if ($Process.HasExited) {
+                    Write-Host "[ERROR] SmartConsole exited immediately with code: $($Process.ExitCode)" -ForegroundColor Red
+                    Write-Host "Possible causes: Wrong password, network issue, or incompatible arguments." -ForegroundColor Yellow
+                } else {
+                    Write-Host "[SUCCESS] SmartConsole launched successfully (PID: $($Process.Id))." -ForegroundColor Green
+                }
+            } catch {
+                Write-Host "[ERROR] Failed to start process: $_" -ForegroundColor Red
+            }
         } else {
             Write-Host "[ERROR] SmartConsole not found at: $SmartConsolePath" -ForegroundColor Red
         }
