@@ -201,6 +201,9 @@ try {
             
             $LoginXmlPath = "$env:TEMP\SmartConsoleLogin_$($PID).xml"
             
+            # Escape special characters for XML if not using CDATA
+            $SafePassword = $Password.Replace("&", "&amp;").Replace("<", "&lt;").Replace(">", "&gt;").Replace("`"", "&quot;").Replace("'", "&apos;")
+
             # Construct the XML content
             # We use CDATA for the password to handle special characters safely
             # We also include the XML declaration
