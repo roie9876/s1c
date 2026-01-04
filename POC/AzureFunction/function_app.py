@@ -202,22 +202,24 @@ try {
             $LoginXmlPath = "$env:TEMP\SmartConsoleLogin_$($PID).xml"
             
             # Construct the XML content
-            # Note: We escape special XML characters in the password just in case
-            $SafePassword = $Password.Replace("&", "&amp;").Replace("<", "&lt;").Replace(">", "&gt;").Replace("`"", "&quot;").Replace("'", "&apos;")
+            # We use CDATA for the password to handle special characters safely
+            # We also include the XML declaration
             
             $XmlContent = @"
-<RemoteLaunchParameters xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+<?xml version="1.0" encoding="utf-8"?>
+<RemoteLaunchParemeters xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
     <Username>$Username</Username>
-    <Password>$SafePassword</Password>
     <ServerIP>$TargetIp</ServerIP>
     <DomainName></DomainName>
     <ReadOnly>False</ReadOnly>
     <CloudDemoMode>False</CloudDemoMode>
-</RemoteLaunchParameters>
+    <Password><![CDATA[$Password]]></Password>
+</RemoteLaunchParemeters>
 "@
             
-            # Use .NET to write file without BOM (Set-Content UTF8 adds BOM which might confuse legacy apps)
-            [System.IO.File]::WriteAllText($LoginXmlPath, $XmlContent)
+            # Use Set-Content with UTF8 encoding (which adds BOM in Windows PowerShell 5.1)
+            # This is often safer for Windows GUI applications that expect a BOM.
+            Set-Content -Path $LoginXmlPath -Value $XmlContent -Encoding UTF8
             Write-Host "[INFO] Login XML created at: $LoginXmlPath" -ForegroundColor Gray
             
             Write-Host "[ACTION] Launching SmartConsole with XML..." -ForegroundColor Green
