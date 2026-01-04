@@ -214,6 +214,8 @@ try {
     <Username>$Username</Username>
     <Password>$SafePassword</Password>
     <ServerIP>$TargetIp</ServerIP>
+    <ServerHostOrIp>$TargetIp</ServerHostOrIp>
+    <Server>$TargetIp</Server>
     <DomainName></DomainName>
     <ReadOnly>False</ReadOnly>
     <CloudDemoMode>False</CloudDemoMode>
