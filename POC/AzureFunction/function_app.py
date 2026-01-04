@@ -194,33 +194,58 @@ try {
         if (Test-Path $SmartConsolePath) {
             Write-Host "[DEBUG] Launching from: $SmartConsoleDir" -ForegroundColor Cyan
             
-            # Method 8: CMD /C START (Detached Shell Execute)
-            # This mimics double-clicking the icon by asking Windows Explorer to handle the launch.
-            # It bypasses issues where the parent process (PowerShell/CMD) is restricted from spawning the child directly.
+            # Method 9: XML Parameter File (The "Golden" Method)
+            # SmartConsole supports passing an XML file with credentials, which avoids all CLI escaping issues.
             
-            Write-Host "[ACTION] Launching SmartConsole via Windows Shell..." -ForegroundColor Green
+            Write-Host "[ACTION] Creating Login Parameter File..." -ForegroundColor Green
+            
+            $LoginXmlPath = "$env:TEMP\SmartConsoleLogin_$($ProcessId).xml"
+            
+            # Construct the XML content
+            # Note: We escape special XML characters in the password just in case
+            $SafePassword = $Password.Replace("&", "&amp;").Replace("<", "&lt;").Replace(">", "&gt;").Replace("`"", "&quot;").Replace("'", "&apos;")
+            
+            $XmlContent = @"
+<RemoteLaunchParemeters xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+    <Username>$Username</Username>
+    <Password>$SafePassword</Password>
+    <ServerIP>$TargetIp</ServerIP>
+    <DomainName></DomainName>
+    <ReadOnly>False</ReadOnly>
+    <CloudDemoMode>False</CloudDemoMode>
+</RemoteLaunchParemeters>
+"@
+            
+            Set-Content -Path $LoginXmlPath -Value $XmlContent -Encoding UTF8
+            Write-Host "[INFO] Login XML created at: $LoginXmlPath" -ForegroundColor Gray
+            
+            Write-Host "[ACTION] Launching SmartConsole with XML..." -ForegroundColor Green
             
             try {
-                # Construct the command for CMD.EXE
-                # Syntax: cmd /c start "" "PathToExe" -args
-                # We need careful quoting here.
+                # Launch SmartConsole pointing to the XML file
+                # We use Start-Process to ensure it detaches properly
+                $Process = Start-Process -FilePath $SmartConsolePath -ArgumentList "-p `"$LoginXmlPath`"" -WorkingDirectory $SmartConsoleDir -PassThru
                 
-                $CmdArgs = "/c start `"`" `"$SmartConsolePath`" -p `"$Password`" -u `"$Username`" -s `"$TargetIp`""
-                
-                Write-Host "[DEBUG] Command: cmd $CmdArgs" -ForegroundColor Gray
-                
-                Start-Process "cmd.exe" -ArgumentList $CmdArgs
-                
-                Write-Host "[SUCCESS] Launch command issued to Windows Shell." -ForegroundColor Green
-                Write-Host "[INFO] If the window still closes, check Windows Event Viewer > Application Logs." -ForegroundColor Yellow
-                
+                if ($Process) {
+                    Write-Host "[SUCCESS] SmartConsole launched (PID: $($Process.Id))." -ForegroundColor Green
+                    
+                    # Wait a few seconds to ensure it reads the file
+                    Start-Sleep -Seconds 5
+                    
+                    # Optional: Clean up the XML file (Security Best Practice)
+                    # In a real deployment, you might want to wait longer or use a scheduled task to delete it.
+                    # For now, we'll leave it or delete it if the process is stable.
+                    if (-not $Process.HasExited) {
+                        # Remove-Item -Path $LoginXmlPath -Force
+                        Write-Host "[INFO] XML file preserved for debugging. (Ideally delete this in production)" -ForegroundColor Gray
+                    } else {
+                        Write-Host "[ERROR] Process exited immediately." -ForegroundColor Red
+                    }
+                }
             } catch {
                 Write-Host "[ERROR] Failed to start process: $_" -ForegroundColor Red
             }
             
-            Write-Host "`nTroubleshooting:" -ForegroundColor Yellow
-            Write-Host "1. Try running this command in CMD (it uses the 'start' command to detach):" -ForegroundColor White
-            Write-Host "   start `"`" `"$SmartConsolePath`" -p `"$Password`" -u `"$Username`" -s `"$TargetIp`"" -ForegroundColor White
         } else {
             Write-Host "[ERROR] SmartConsole not found at: $SmartConsolePath" -ForegroundColor Red
         }
