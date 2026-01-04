@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Infinity Portal Simulator (PoC)</title>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f4f4f4; padding: 20px; }
+        .container { max-width: 900px; margin: 0 auto; }
+        h1 { color: #e83e8c; } /* Check Point Pink-ish */
+        
+        .card { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); margin-bottom: 20px; }
+        
+        table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+        th, td { text-align: left; padding: 12px; border-bottom: 1px solid #ddd; }
+        th { background-color: #333; color: white; }
+        
+        .btn { background-color: #007bff; color: white; padding: 8px 16px; text-decoration: none; border-radius: 4px; border: none; cursor: pointer; }
+        .btn:hover { background-color: #0056b3; }
+        
+        .alert { padding: 10px; margin-bottom: 15px; border-radius: 4px; }
+        .alert-success { background-color: #d4edda; color: #155724; }
+        .alert-error { background-color: #f8d7da; color: #721c24; }
+
+        .refresh-btn { float: right; background-color: #6c757d; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Infinity Portal Simulator</h1>
+        <p>This local app simulates the <b>Infinity Portal</b>. Clicking "Connect" sends a request to the <b>Real Azure Function</b>.</p>
+
+        <!-- FLASH MESSAGES -->
+        {% with messages = get_flashed_messages(with_categories=true) %}
+          {% if messages %}
+            {% for category, message in messages %}
+              <div class="alert alert-{{ category }}">{{ message }}</div>
+            {% endfor %}
+          {% endif %}
+        {% endwith %}
+
+        <!-- CUSTOMER LIST -->
+        <div class="card">
+            <h2>Available Management Servers</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Customer Name</th>
+                        <th>IP Address</th>
+                        <th>User</th>
+                        <th>Action</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for cust in customers %}
+                    <tr>
+                        <td>{{ cust.name }}</td>
+                        <td>{{ cust.ip }}</td>
+                        <td>{{ cust.user }}</td>
+                        <td>
+                            <form action="/connect/{{ cust.id }}" method="POST">
+                                <button type="submit" class="btn">Connect</button>
+                            </form>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+
+        <!-- LOCAL HISTORY -->
+        <div class="card">
+            <h2>Request History (Local Log)</h2>
+            <form action="/reset" method="POST" style="display:inline;">
+                <button type="submit" class="btn refresh-btn">Clear Log</button>
+            </form>
+            
+            {% for user, requests in history.items() %}
+                <h3>User: {{ user }}</h3>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Time</th>
+                            <th>Target</th>
+                            <th>Status</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for req in requests %}
+                        <tr>
+                            <td>{{ req.timestamp }}</td>
+                            <td>{{ req.targetName }}</td>
+                            <td>{{ req.status }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            {% else %}
+                <p>No requests sent yet.</p>
+            {% endfor %}
+        </div>
+    </div>
+</body>
+</html>

@@ -95,7 +95,8 @@ Based on the analysis of the network trace (`portal.checkpoint.com.har`), the fl
     *   **Body:**
         ```json
         {
-            "url": "https://...appstream2.us-east-1.aws.amazon.com/..."
+          "success": true,
+          "data": "https://appstream2.us-east-1.aws.amazon.com/authenticate?parameters=eyJ0eXBlIjoiRU5EX1VTRVIiLC..."
         }
         ```
     *   **Mechanism:** The backend generates a pre-signed or parameterized URL containing the session context.
@@ -127,12 +128,13 @@ Since we cannot push context via the URL in AVD, and users may have multiple con
     *   **Data Structure:**
         ```json
         {
-            "userId": "roie@mssp.com",
-            "requestId": "guid-123",
-            "targetIp": "1.2.3.4",
-            "credentials": "{encrypted}",
-            "status": "PENDING", // or CONSUMED
-            "timestamp": "2023-10-27T10:00:00Z"
+          "requestId": "guid",
+          "userId": "user@company.com", // Must match the AVD UPN
+          "targetIp": "1.2.3.4",
+          "targetUser": "admin",
+          "targetPass": "encrypted_secret",
+          "status": "PENDING", // PENDING -> CONSUMED
+          "timestamp": "2023-10-27T10:00:00Z"
         }
         ```
 
@@ -145,10 +147,10 @@ Since we cannot push context via the URL in AVD, and users may have multiple con
     *   **Role:** The actual application published to users.
     *   **Logic:**
         1.  Starts up.
-        2.  Identifies the user (via Windows Identity/SSO).
-        3.  Calls Azure Backend: *"Do I have a pending connection request?"*
-        4.  Backend returns the details (IP, Creds).
-        5.  Launcher marks request as `CONSUMED`.
+        2.  Identifies the current user (e.g., `whoami` / UPN).
+        3.  Calls Azure Backend: *"Get next PENDING request for Me"*.
+        4.  Receives payload (IP, User, Pass).
+        5.  Decrypts password.
         6.  Launches `SmartConsole.exe` with the retrieved credentials.
 
 ### 3.1 Detailed Workflow (The "Queue" Flow)
@@ -159,6 +161,10 @@ Since we cannot push context via the URL in AVD, and users may have multiple con
 
 2.  **Request Staging (Backend):**
     *   Infinity Portal calls Azure API: `POST /api/connection-request`.
+    *   Azure API validates the request and writes a record to the **Connection Queue**:
+        *   `User: roie@mssp.com`
+        *   `Target: Customer A`
+        *   `Status: PENDING`
 
 3.  **User Launch (AVD):**
     *   User is redirected to the AVD Web Client (or opens their AVD Client).
@@ -166,8 +172,9 @@ Since we cannot push context via the URL in AVD, and users may have multiple con
 
 4.  **Context Retrieval (Launcher):**
     *   The "Launcher" app starts in the AVD session.
-    *   It calls `GET /api/fetch-connection?user=roie@mssp.com`.
-    *   API checks Cosmos DB for the *latest* `PENDING` request for this user.
+    *   It detects it is running as `roie@mssp.com`.
+    *   It polls the Azure API: *"Do I have a pending connection?"*
+    *   API checks the Queue for `roie@mssp.com` with `Status: PENDING`.
     *   API returns the details for "Customer A" and updates status to `CONSUMED`.
 
 5.  **Application Start:**
@@ -176,9 +183,11 @@ Since we cannot push context via the URL in AVD, and users may have multiple con
 
 6.  **MSSP Scenario (Multiple Connections):**
     *   User goes back to Portal, clicks "Customer B".
-    *   Portal creates *new* `PENDING` request for "Customer B".
-    *   User launches "Smart Console" again (AVD allows multiple instances or user starts a new session).
-    *   New Launcher instance starts -> fetches "Customer B" -> Launches Console B.
+    *   Portal writes "Customer B" to Queue (Status: PENDING).
+    *   User launches *another* instance of "Smart Console" from AVD.
+    *   New Launcher instance starts, asks API.
+    *   API finds "Customer B" (since A is already CONSUMED).
+    *   Launcher starts Smart Console for Customer B.
     *   **Result:** User has two windows open: one for A, one for B.
 
 ## 4. Key Challenges & Solutions
@@ -197,8 +206,8 @@ Since we cannot push context via the URL in AVD, and users may have multiple con
 *   We publish a custom **Launcher** (C#/.NET or PowerShell wrapper).
 *   **Mechanism:**
     *   The Launcher handles the API call to fetch credentials.
-    *   It constructs the command line arguments for Smart Console.
-    *   It uses `Process.Start()` to run the console.
+    *   The Launcher uses `System.Diagnostics.Process` to start `SmartConsole.exe`.
+    *   **Injection:** Credentials are passed via command-line arguments (if supported) or by generating a temporary configuration file that Smart Console reads on startup.
     *   *Security Note:* Command line arguments can be visible to other admins on the machine. If this is a risk, we will use a temporary secure config file or memory injection.
 
 ### Challenge 3: "Pull" Model Latency
@@ -220,8 +229,8 @@ Since we cannot push context via the URL in AVD, and users may have multiple con
 *   **Technology:** **Azure Virtual Desktop (AVD) Web Client**.
 *   **Flow:**
     1.  User navigates to the Portal URL.
-    2.  Portal authenticates user.
-    3.  Portal detects "Azure Tenant".
+    2.  Portal renders the AVD Web Client iframe or redirects to the AVD Web Client URL.
+    3.  **Deep Linking:** The URL `.../mgmt/<MANAGEMENT_ID>` will be the trigger.
     4.  **Context Lookup:** The `<MANAGEMENT_ID>` (e.g., `ifmRJurBAnvXSDfVUwXyv8`) is the key used by the Helper App to fetch the correct IP/Credentials from the backend.
 
 ## 6. Account Context & Entry Point Analysis
@@ -237,7 +246,8 @@ This URL acts as the **Tenant Resolver**.
 3.  **Routing:** The Portal knows which "Farm" (AWS or Azure) this account belongs to.
 4.  **Migration Strategy:**
     *   This URL remains hosted in AWS (Infinity Portal).
-    *   When user logs in, Portal checks: "Is Account `c4b83f3f` migrated to Azure?"
+    *   **Routing Logic Update:** The Infinity Portal's backend logic must be updated to check a flag: `is_migrated_to_azure`.
+    *   **If False (AWS):** Continue existing flow (AppStream).
     *   **If True (Azure):** Redirect user to the **AVD Web Client** URL instead of the AppStream URL.
 
 **Updated User Journey:**
@@ -255,8 +265,8 @@ This URL acts as the **Tenant Resolver**.
     *   Example: `roie9876-dejucj4n/c4b83f3f-b864-4c83-ad62-5df7deb98146/portal.checkpoint.com`
 *   **AppStream URL Structure:**
     *   `https://...appstream2.us-east-1.aws.amazon.com/#/streaming`
-    *   `?reference=fleet%2FSmartConsoleR82-TF`
-    *   `&app=SmartConsole`
+    *   `?reference=fleet%2FSmartConsoleR82-TF` (Identifies the Fleet/Image)
+    *   `&app=SmartConsole` (Identifies the Application)
     *   `&context=...` (A massive encrypted string!)
 
 **Analysis of the AWS "Context" Parameter (Decoded):**
@@ -266,7 +276,13 @@ The `&context=` parameter in the URL is exactly what we suspected. It contains t
 ```json
 {
   "type": "END_USER",
-  "userContext": "...", // Encrypted Blob
+  "expires": "1767507055",
+  "awsAccountId": "888019224369",
+  "userId": "fc6a2e21f83249aeb0bcb8d320cf4cdb",
+  "catalogSource": "stack/SmartConsoleR82-TF",
+  "fleetRef": "fleet/SmartConsoleR82-TF",
+  "applicationId": "SmartConsole",
+  "userContext": "o9tGeBss6rykoTPx+aPyuJyQJGRdX1MmhvgRbTObQ4/LzqLqPMoLjE+7/kk6YuZ7cVwT+DFgoqTLFXGThZ5yRqjyi+SqUVJnY6GNkHGRt5fHoCYxPVp962Z0dyD8w2S0xRF9d4AZ+a+s2779sScYJk4ipQ5AeJyGdTxHEnx176VtCJGWgfvUcn2UyI/Gl9h7Rb533vYdO2E+B9j20Yk/m1wEC/Fiff8YamKSVptXFjo=",
   "maxUserDurationInSecs": "7200"
 }
 ```
@@ -281,9 +297,10 @@ Since AVD Web Client **does not** support a `&context=` parameter in the URL (as
 3.  **Redirect:** Portal redirects user to `https://windows.cloud.microsoft/webclient/...` (No context string).
 4.  **Execution:**
     *   AVD Session starts.
-    *   Helper App (Launcher) starts.
-    *   Helper App asks Backend: "Give me the context for User X".
-    *   Backend returns the "Connection Token" and credentials.
+    *   Helper App runs `whoami` -> gets `user@company.com`.
+    *   Helper App calls Backend: "Get my Connection Token".
+    *   Backend returns: `roie9876-dejucj4n/c4b83f3f...`
+    *   Helper App parses this token to find the Management Server IP and credentials.
     *   Helper App launches Smart Console.
 
 ## 10. Context Store Technology Selection (Key Vault vs. Redis)
@@ -321,6 +338,7 @@ Since we cannot pass the "Target ID" in the URL, we must rely on the **Time-Base
 **The Workflow:**
 1.  **Selection (Infinity Portal):**
     *   User `roie@mssp.com` is on the Infinity Portal.
+    *   He sees a list of 50 customers.
     *   He clicks "Connect" on **Customer A**.
 
 2.  **Staging (Backend):**
@@ -334,8 +352,8 @@ Since we cannot pass the "Target ID" in the URL, we must rely on the **Time-Base
 
 4.  **Retrieval (Helper App):**
     *   Helper App calls Backend: "What is the **active launch request** for `roie@mssp.com`?"
-    *   Backend checks `ActiveLaunch:roie@mssp.com`.
-    *   Backend returns "Customer A".
+    *   Backend checks the `ActiveLaunch` key.
+    *   Backend returns: "Customer A".
     *   Backend **deletes** the key (to prevent replay or confusion).
 
 5.  **Result:**
@@ -351,7 +369,7 @@ The context stored in the backend (Key Vault/Redis) is **transient**. It exists 
 2.  **Expiration (TTL):** Set to **60 seconds**. If the user closes the browser or the network fails, the key self-destructs to prevent stale data.
 3.  **Consumption & Deletion:**
     *   The Helper App reads the key.
-    *   The Backend **immediately deletes** the key upon successful read.
+    *   **CRITICAL:** The Helper App immediately **deletes** the key after reading.
     *   **Reason:** Prevents "Replay Attacks" (malicious actors trying to reuse the session) and ensures hygiene.
 
 **Concurrency Scenario (The "Double Click" Problem):**
@@ -388,8 +406,9 @@ Since Infinity Portal owns the "Real" identity, the Azure identities are just "S
 2.  **Action:** Infinity Portal uses the Microsoft Graph API to **invite** the user (`roie@gmail.com`) to the Azure Tenant as a **Guest User**.
 3.  **Flow:**
     *   User clicks "Connect".
-    *   Portal redirects to AVD.
-    *   AVD prompts for Microsoft Login (or uses SSO if federated).
+    *   If not in Entra ID -> Create Guest User via API.
+    *   Redirect to AVD.
+    *   User accepts the "Microsoft Permission" prompt once.
     *   Session starts.
 
 **Option B: Dedicated "Cloud-Only" Users**
@@ -402,8 +421,8 @@ Since Infinity Portal owns the "Real" identity, the Azure identities are just "S
 *   **Configure Entra ID** to trust **Infinity Portal** as an Identity Provider.
 *   **Flow:**
     1.  User goes to AVD URL.
-    2.  AVD redirects to Entra ID.
-    3.  Entra ID sees domain `@checkpoint-portal.com` and redirects to Infinity Portal.
+    2.  Azure redirects user to Infinity Portal for login.
+    3.  Infinity Portal says "Yes, this is Roie" and sends a token back to Azure.
     4.  Azure logs Roie in.
 *   **Benefit:** Seamless SSO. No new passwords. No "Guest" invites.
 
@@ -416,9 +435,8 @@ Since Infinity Portal owns the "Real" identity, the Azure identities are just "S
 ### Challenge 3: Automation & Orchestration
 **The Issue:** Creating new Management Servers for new customers automatically.
 **Solution:**
-*   **Terraform** or **Bicep** to define the Management Server VM template.
-*   **Azure Functions** to trigger deployment when a new customer signs up in Infinity Portal.
-
+*   Use **Terraform** or **Bicep** to define the Management Server VM template.
+*   Trigger deployment via **Azure Functions** when a new customer signs up in Infinity Portal.
 ## 12. PoC Implementation Specifications
 
 ### 12.1 Component: Azure Cosmos DB
@@ -431,11 +449,13 @@ Since Infinity Portal owns the "Real" identity, the Azure identities are just "S
 ```json
 {
     "id": "guid-generated-by-portal",
-    "userId": "roie@mssp.com",
-    "targetIp": "10.0.0.5",
-    "credentials": "encrypted-string",
-    "status": "PENDING",
-    "timestamp": "2023-10-27T12:00:00Z",
+    "userId": "roie@mssp.com",        // Partition Key
+    "targetName": "Customer A",
+    "targetIp": "10.0.1.5",
+    "username": "admin",
+    "password": "encrypted_or_plain_for_poc",
+    "status": "PENDING",              // Enum: PENDING, CONSUMED
+    "createdTime": "2026-01-04T10:00:00Z",
     "ttl": 60                         // Auto-delete after 60s
 }
 ```
@@ -447,20 +467,35 @@ Since Infinity Portal owns the "Real" identity, the Azure identities are just "S
     *   **Logic:** Writes the document to Cosmos DB with `status: "PENDING"`.
 *   **Function 2: `FetchConnection` (GET)**
     *   **Input:** Query param `?userId=roie@mssp.com`.
+    *   **Logic:**
+        1.  Query Cosmos DB: `SELECT * FROM c WHERE c.userId = @userId AND c.status = 'PENDING'`.
+        2.  If found:
+            *   Mark as `CONSUMED` (Update document).
+            *   Return the payload (IP, User, Pass).
+        3.  If not found: Return `404 Not Found`.
 
 ### 12.3 Component: PowerShell Launcher (The Client)
 *   **Location:** Runs inside the AVD Session (User Context).
 *   **Logic Flow:**
     ```powershell
-    $apiUrl = "https://my-func.azurewebsites.net/api"
-    $user = Get-CurrentUserUPN
-    
-    # Poll for connection
-    $response = Invoke-RestMethod -Uri "$apiUrl/fetch_connection?userId=$user"
-    
-    if ($response.status -eq "FOUND") {
-        $args = "-u $($response.user) -p $($response.pass) -t $($response.ip)"
-        Start-Process "SmartConsole.exe" -ArgumentList $args
+    # 1. Identify User
+    $upn = whoami /upn
+
+    # 2. Poll Backend
+    $response = Invoke-RestMethod -Uri "https://<func-app>.azurewebsites.net/api/FetchConnection?userId=$upn" -Method Get -ErrorAction SilentlyContinue
+
+    # 3. Check Response
+    if ($response) {
+        $ip = $response.targetIp
+        $user = $response.username
+        $pass = $response.password
+
+        # 4. Launch Application
+        # Note: For PoC, we can just launch Notepad with arguments to prove it works
+        Start-Process "notepad.exe" -ArgumentList "/A $ip $user"
+        
+        # Real Implementation:
+        # Start-Process "SmartConsole.exe" -ArgumentList "-p $pass -u $user -t $ip"
     } else {
         Write-Host "No pending connection found."
     }
