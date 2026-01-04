@@ -206,18 +206,19 @@ try {
             # We also include the XML declaration
             
             $XmlContent = @"
-<RemoteLaunchParameters xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+<?xml version="1.0" encoding="utf-8"?>
+<RemoteLaunchParemeters xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
     <Username>$Username</Username>
     <Password>$SafePassword</Password>
     <ServerIP>$TargetIp</ServerIP>
     <DomainName></DomainName>
     <ReadOnly>False</ReadOnly>
     <CloudDemoMode>False</CloudDemoMode>
-</RemoteLaunchParameters>
+</RemoteLaunchParemeters>
 "@
             
-            # Use .NET to write file without BOM (Set-Content UTF8 adds BOM which might confuse legacy apps)
-            [System.IO.File]::WriteAllText($LoginXmlPath, $XmlContent)
+            # Use Set-Content to include BOM (Reverting to what worked for opening the app)
+            Set-Content -Path $LoginXmlPath -Value $XmlContent -Encoding UTF8
             Write-Host "[INFO] Login XML created at: $LoginXmlPath" -ForegroundColor Gray
             
             Write-Host "[ACTION] Launching SmartConsole with XML..." -ForegroundColor Green
