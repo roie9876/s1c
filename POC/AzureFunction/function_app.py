@@ -229,8 +229,11 @@ try {
             try {
                 # Launch SmartConsole pointing to the XML file
                 # Capture stdout/stderr to help diagnose why it exits
+                # Always create placeholder log files so we can see them even if SmartConsole never writes
                 $StdOutPath = "$env:TEMP\SmartConsole_stdout_$($PID).log"
                 $StdErrPath = "$env:TEMP\SmartConsole_stderr_$($PID).log"
+                New-Item -Path $StdOutPath -ItemType File -Force | Out-Null
+                New-Item -Path $StdErrPath -ItemType File -Force | Out-Null
                 
                 $Process = Start-Process -FilePath $SmartConsolePath -ArgumentList "-p `"$LoginXmlPath`"" -WorkingDirectory $SmartConsoleDir -PassThru -RedirectStandardOutput $StdOutPath -RedirectStandardError $StdErrPath
                 
@@ -242,8 +245,15 @@ try {
                     # Wait up to 20s to see if the process exits and capture the exit code
                     $null = Wait-Process -Id $Process.Id -Timeout 20 -ErrorAction SilentlyContinue
                     
-                    if ($Process.HasExited) {
+                    # Re-read the process object to refresh exit info
+                    $Process = Get-Process -Id $Process.Id -ErrorAction SilentlyContinue
+                    
+                    if ($Process -and $Process.HasExited) {
                         Write-Host "[ERROR] Process exited. ExitCode=$($Process.ExitCode)" -ForegroundColor Red
+                        if (Test-Path $StdErrPath) { Write-Host "[DEBUG] stderr contents:" -ForegroundColor Yellow; Get-Content $StdErrPath }
+                        if (Test-Path $StdOutPath) { Write-Host "[DEBUG] stdout contents:" -ForegroundColor Yellow; Get-Content $StdOutPath }
+                    } elseif (-not $Process) {
+                        Write-Host "[ERROR] Process object not found after wait; it likely exited quickly." -ForegroundColor Red
                         if (Test-Path $StdErrPath) { Write-Host "[DEBUG] stderr contents:" -ForegroundColor Yellow; Get-Content $StdErrPath }
                         if (Test-Path $StdOutPath) { Write-Host "[DEBUG] stdout contents:" -ForegroundColor Yellow; Get-Content $StdOutPath }
                     } else {
