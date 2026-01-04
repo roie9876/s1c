@@ -266,6 +266,48 @@ try {
             } catch {
                 Write-Host "[ERROR] Failed to start process: $_" -ForegroundColor Red
             }
+                # Method 10: Launch UI and prefill user/server; user enters password manually
+                Write-Host "[ACTION] Launching SmartConsole (user will type password)..." -ForegroundColor Green
+            
+                try {
+                    $Process = Start-Process -FilePath $SmartConsolePath -WorkingDirectory $SmartConsoleDir -PassThru
+                    if ($Process) {
+                        Write-Host "[SUCCESS] SmartConsole launched (PID: $($Process.Id))." -ForegroundColor Green
+                    
+                        # Wait for main window handle (up to 30s)
+                        $handle = 0
+                        for ($i = 0; $i -lt 60; $i++) {
+                            $p = Get-Process -Id $Process.Id -ErrorAction SilentlyContinue
+                            if ($p -and $p.MainWindowHandle -ne 0) { $handle = $p.MainWindowHandle; break }
+                            Start-Sleep -Milliseconds 500
+                        }
+                    
+                        if ($handle -eq 0) {
+                            Write-Host "[WARN] Could not find SmartConsole window handle; skipping auto-fill." -ForegroundColor Yellow
+                            return
+                        }
+                    
+                        # Bring window to foreground
+                        Add-Type @"
+    using System;
+    using System.Runtime.InteropServices;
+    public static class Win32Foreground {
+        [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);
+    }
+    "@
+                        [Win32Foreground]::SetForegroundWindow($handle) | Out-Null
+                        Start-Sleep -Milliseconds 500
+
+                        # Send username and server; leave password blank for the user to type
+                        Add-Type -AssemblyName System.Windows.Forms
+                        # Typical tab order: Username -> Password -> Server. We send two TABs to land on Server.
+                        $keys = "$Username{TAB}{TAB}$TargetIp"
+                        [System.Windows.Forms.SendKeys]::SendWait($keys)
+                        Write-Host "[INFO] Prefilled username/server; please type password and click Login." -ForegroundColor Cyan
+                    }
+                } catch {
+                    Write-Host "[ERROR] Failed to start or prefill SmartConsole: $_" -ForegroundColor Red
+                }
             
         } else {
             Write-Host "[ERROR] SmartConsole not found at: $SmartConsolePath" -ForegroundColor Red
