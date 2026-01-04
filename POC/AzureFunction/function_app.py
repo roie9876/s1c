@@ -105,11 +105,12 @@ def fetch_connection(req: func.HttpRequest) -> func.HttpResponse:
         return func.HttpResponse(f"Internal Server Error: {str(e)}", status_code=500)
 
 
-@app.route(route="download_launcher", methods=["GET"])
+@app.route(route="dl", methods=["GET"])
 def download_launcher(req: func.HttpRequest) -> func.HttpResponse:
     """
     Serves the Launcher.ps1 script directly.
     Allows AVD VMs to download the script without clipboard/drive mapping.
+    Short route: /api/dl
     """
     logging.info('Serving Launcher.ps1')
     

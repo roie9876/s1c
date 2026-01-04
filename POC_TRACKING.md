@@ -36,9 +36,11 @@ This document tracks the state of the Check Point Farm Migration PoC. Use this t
 5.  Updated `LocalPortal/templates/index.html` with a proper UI (Flash messages, History).
 6.  Changed Local Portal port to **5001** to avoid 403 errors.
 7.  Updated `LocalPortal/app.py` to handle HTTP 201 responses from Azure.
+8.  Added `/download_launcher` endpoint to Azure Function to simplify AVD deployment.
 
 ## Immediate Next Steps
-1.  **End-to-End Test:**
+1.  **Redeploy Azure Function:** Run `func azure functionapp publish s1c-function-11729` to push the new download endpoint.
+2.  **End-to-End Test:**
     *   Run Portal (Local).
     *   Run Launcher (Local PowerShell).
     *   Verify "Connect" click -> Cosmos DB entry -> Launcher retrieval.
