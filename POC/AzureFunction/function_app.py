@@ -189,30 +189,46 @@ try {
         # Real Implementation:
         # Adjust the path below to match your specific SmartConsole version (e.g., R81.10, R81.20)
         $SmartConsolePath = "C:\Program Files (x86)\CheckPoint\SmartConsole\R82\PROGRAM\SmartConsole.exe"
+        $SmartConsoleDir = "C:\Program Files (x86)\CheckPoint\SmartConsole\R82\PROGRAM"
         
         if (Test-Path $SmartConsolePath) {
-            # Use -PassThru to get the process object so we can check if it exits immediately
-            $SCArgs = "-p `"$Password`" -u `"$Username`" -s `"$TargetIp`""
-            Write-Host "[DEBUG] Launching with args: $SCArgs" -ForegroundColor Cyan
+            Write-Host "[DEBUG] Launching from: $SmartConsoleDir" -ForegroundColor Cyan
+            
+            # Method 4: Start-Process with Single String Arguments (Best for Legacy Apps)
+            # We construct the argument string manually to ensure quotes are preserved exactly as expected.
+            $ArgString = "-p `"$Password`" -u `"$Username`" -s `"$TargetIp`""
+            
+            Write-Host "[DEBUG] Arguments: $ArgString" -ForegroundColor Cyan
+            Write-Host "[ACTION] Launching SmartConsole..." -ForegroundColor Green
             
             try {
-                $Process = Start-Process -FilePath $SmartConsolePath -ArgumentList $SCArgs -PassThru
+                Push-Location $SmartConsoleDir
                 
-                # Wait a few seconds to see if it crashes immediately
+                # Use Start-Process with a single string argument list
+                $Process = Start-Process -FilePath ".\SmartConsole.exe" -ArgumentList $ArgString -PassThru
+                
+                # Wait to see if it crashes
                 Start-Sleep -Seconds 5
                 
                 if ($Process.HasExited) {
-                    Write-Host "[ERROR] SmartConsole exited immediately with code: $($Process.ExitCode)" -ForegroundColor Red
-                    Write-Host "Possible causes: Wrong password, network issue, or incompatible arguments." -ForegroundColor Yellow
+                    Write-Host "[ERROR] Process exited immediately (Code: $($Process.ExitCode))." -ForegroundColor Red
+                    Write-Host "Troubleshooting:" -ForegroundColor Yellow
+                    Write-Host "1. Copy and run this command in CMD to test:" -ForegroundColor White
+                    Write-Host "   `"$SmartConsolePath`" $ArgString" -ForegroundColor White
                 } else {
-                    Write-Host "[SUCCESS] SmartConsole launched successfully (PID: $($Process.Id))." -ForegroundColor Green
+                    Write-Host "[SUCCESS] SmartConsole is running (PID: $($Process.Id))." -ForegroundColor Green
                 }
+                
+                Pop-Location
             } catch {
                 Write-Host "[ERROR] Failed to start process: $_" -ForegroundColor Red
             }
         } else {
             Write-Host "[ERROR] SmartConsole not found at: $SmartConsolePath" -ForegroundColor Red
         }
+        
+        # Keep window open
+        Read-Host "Press Enter to exit..."
         
     }
 }
