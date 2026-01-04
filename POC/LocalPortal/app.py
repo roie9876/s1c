@@ -20,7 +20,7 @@ CUSTOMERS = [
     {"id": "cust_1", "name": "Acme Corp (Firewall A)", "ip": "10.0.1.5", "user": "admin"},
     {"id": "cust_2", "name": "Globex Inc (Firewall B)", "ip": "192.168.10.20", "user": "admin"},
     {"id": "cust_3", "name": "Soylent Corp (Firewall C)", "ip": "172.16.0.5", "user": "readonly"},
-    {"id": "cust_4", "name": "Real Test (Azure VM)", "ip": "20.240.218.22", "user": "cp1", "password": "VMware1!"}
+    {"id": "cust_4", "name": "Real Test (Azure VM)", "ip": "20.240.218.22", "user": "cp1", "password": "VMware1!VMware1!"}
 ]
 
 @app.route('/')
