@@ -102,74 +102,108 @@ Based on the observed URL transitions, the AWS solution functions as follows:
 
 ## 3. Proposed Architecture (Azure)
 
-### Service Mapping
+### Core Concept: The "Pull" Model with Connection Queue
+Since we cannot push context via the URL in AVD, and users may have multiple concurrent connections (MSSP scenario), we will implement a **"Connection Request Queue"** pattern.
 
-| Component | AWS Service (Current) | Azure Service (Target) | Notes |
-| :--- | :--- | :--- | :--- |
-| **Management Servers** | Amazon EC2 | **Azure Virtual Machines** | Host the Check Point Management Servers (Gaia OS). |
-| **VDI / App Streaming** | AWS AppStream / Workspaces | **Azure Virtual Desktop (AVD)** | Supports RemoteApp (streaming just the app) or Full Desktop. |
-| **Identity/Auth** | Custom / AWS IAM | **Entra ID (Azure AD)** | Potential to integrate for RBAC, though Infinity Portal handles primary auth. |
-| **Network** | AWS VPC | **Azure VNet** | |
+### Components
+1.  **Infinity Portal (AWS - Existing)**
+    *   **Role:** User Interface.
+    *   **New Action:** Instead of generating a URL with a payload, it writes a "Connection Request" to the Azure Backend.
 
-### Detailed Azure Workflow
+2.  **Azure Backend (New)**
+    *   **Component:** Azure Functions + Azure Cosmos DB (or Redis/Queue Storage).
+    *   **Role:** Stores "Pending Connection Requests".
+    *   **Data Structure:**
+        ```json
+        {
+          "requestId": "guid",
+          "userId": "user@company.com", // Must match the AVD UPN
+          "targetIp": "1.2.3.4",
+          "targetUser": "admin",
+          "targetPass": "encrypted_secret",
+          "status": "PENDING", // PENDING -> CONSUMED
+          "timestamp": "2023-10-27T10:00:00Z"
+        }
+        ```
 
-1.  **The Farm (Azure VMs)**
-    *   Deploy Check Point Management Servers as Azure VMs.
-    *   Use **Azure Scale Sets** if dynamic scaling of the farm is required, or managed Availability Sets for persistence.
-    *   **Storage:** Managed Disks (Premium SSD recommended for database performance).
+3.  **Azure Virtual Desktop (AVD)**
+    *   **Host Pool:** Windows 10/11 Multi-session.
+    *   **Identity:** Entra ID (Azure AD) joined.
+    *   **Published App:** "Smart Console Launcher" (Custom Wrapper).
 
-2.  **Access Layer (Azure Virtual Desktop - AVD)**
-    *   **Host Pool:** Create a Windows 10/11 Multi-session host pool to serve Smart Console.
-    *   **RemoteApp:** Publish "Check Point Smart Console" as a RemoteApp (instead of full desktop) for a seamless experience similar to AppStream.
-    *   **Custom Wrapper:** The "Helper App" will need to be deployed on these AVD hosts.
+4.  **The "Launcher" App (Custom Exe)**
+    *   **Role:** The actual application published to users.
+    *   **Logic:**
+        1.  Starts up.
+        2.  Identifies the current user (e.g., `whoami` / UPN).
+        3.  Calls Azure Backend: *"Get next PENDING request for Me"*.
+        4.  Receives payload (IP, User, Pass).
+        5.  Decrypts password.
+        6.  Launches `SmartConsole.exe` with the retrieved credentials.
 
-3.  **Connectivity (AWS <-> Azure)**
-    *   Since Infinity Portal stays in AWS, we need a secure channel to trigger the Azure session.
-    *   **Option A (VPN/ExpressRoute):** Site-to-Site VPN between AWS VPC and Azure VNet to allow direct communication if needed.
-    *   **Option B (Public API):** Infinity Portal calls an Azure Function or Logic App via HTTPS to request a session.
+### 3.1 Detailed Workflow (The "Queue" Flow)
+
+1.  **User Action (Portal):**
+    *   User logs into Infinity Portal (AWS).
+    *   User selects "Customer A - Firewall 1" and clicks "Connect".
+
+2.  **Request Staging (Backend):**
+    *   Infinity Portal calls Azure API: `POST /api/connection-request`.
+    *   Azure API validates the request and writes a record to the **Connection Queue**:
+        *   `User: roie@mssp.com`
+        *   `Target: Customer A`
+        *   `Status: PENDING`
+
+3.  **User Launch (AVD):**
+    *   User is redirected to the AVD Web Client (or opens their AVD Client).
+    *   User launches the **"Smart Console"** RemoteApp.
+
+4.  **Context Retrieval (Launcher):**
+    *   The "Launcher" app starts in the AVD session.
+    *   It detects it is running as `roie@mssp.com`.
+    *   It polls the Azure API: *"Do I have a pending connection?"*
+    *   API checks the Queue for `roie@mssp.com` with `Status: PENDING`.
+    *   API returns the details for "Customer A" and updates status to `CONSUMED`.
+
+5.  **Application Start:**
+    *   Launcher executes: `SmartConsole.exe -u admin -p **** -t 1.2.3.4`.
+    *   Smart Console opens, connected to Customer A.
+
+6.  **MSSP Scenario (Multiple Connections):**
+    *   User goes back to Portal, clicks "Customer B".
+    *   Portal writes "Customer B" to Queue (Status: PENDING).
+    *   User launches *another* instance of "Smart Console" from AVD.
+    *   New Launcher instance starts, asks API.
+    *   API finds "Customer B" (since A is already CONSUMED).
+    *   Launcher starts Smart Console for Customer B.
+    *   **Result:** User has two windows open: one for A, one for B.
 
 ## 4. Key Challenges & Solutions
 
-### Challenge 1: Passing Encrypted Credentials (The "Seamless Pull" Model)
+### Challenge 1: Identity Provider Mismatch (Infinity Portal vs. Entra ID)
+**Problem:** Infinity Portal uses a proprietary IdP. AVD requires Entra ID (Azure AD).
+**Solution:**
+*   **Federation (Recommended):** Configure Federation (SAML/OIDC) between the Infinity Portal IdP and the Azure Entra ID tenant. This ensures that when a user logs into AVD, they are recognized as the *same identity* that initiated the request in the portal.
+*   **B2B Guest Users:** Alternatively, provision Infinity Portal users as B2B Guest users in the Azure tenant.
+*   **Mapping:** The "Connection Request" must be tagged with the **Entra ID UPN** of the user. If the Portal knows the user as `roie`, but Entra knows them as `roie_gmail.com#EXT#@...`, the Portal must write the request using the Entra UPN so the Launcher can find it.
 
-**The Issue:** 
-The current AWS AppStream flow is seamless: the user clicks "Connect" and the app opens.
-The "Dynamic RDP File" method (Challenge 1 above) requires the user to download and open a file, which is a degraded user experience.
-Furthermore, the AVD Web Client (HTML5) does **not** support passing dynamic arguments in the URL.
+### Challenge 2: Passing Credentials to RemoteApp
+**Problem:** How to inject retrieved credentials into the Smart Console application?
+**Solution: The Launcher Pattern**
+*   We do not publish `SmartConsole.exe` directly.
+*   We publish a custom **Launcher** (C#/.NET or PowerShell wrapper).
+*   **Mechanism:**
+    *   The Launcher handles the API call to fetch credentials.
+    *   The Launcher uses `System.Diagnostics.Process` to start `SmartConsole.exe`.
+    *   **Injection:** Credentials are passed via command-line arguments (if supported) or by generating a temporary configuration file that Smart Console reads on startup.
+    *   *Security Note:* Command line arguments can be visible to other admins on the machine. If this is a risk, we will use a temporary secure config file or memory injection.
 
-**Proposed Solution: The "Context Store" Pattern (Pull Model)**
-Instead of *pushing* the credentials to the app via the connection string, the app will *pull* them from a secure backend based on the user's identity.
-
-**The Workflow:**
-1.  **User Action:** User clicks "Connect" in the Infinity Portal.
-2.  **Context Staging:** 
-    *   Infinity Portal generates a "Connection Context" (Target IP, User, Pass).
-    *   It saves this context to a secure database (e.g., Azure Redis / Cosmos DB) keyed by the **User's Email/UPN**.
-    *   *Key:* `user@company.com` -> *Value:* `{ "target_ip": "1.2.3.4", "creds": "..." }`
-3.  **Deep Link Launch:** 
-    *   Infinity Portal redirects the user's browser to the **AVD Web Client Deep Link**:
-    *   `https://windows.cloud.microsoft/webclient/avd/<WorkspaceID>/<ResourceID>`
-4.  **Seamless Sign-On:** 
-    *   Since the user is already authenticated with Azure AD (Entra ID), the AVD Web Client logs them in automatically (SSO).
-5.  **App Start:** 
-    *   The "Helper App" starts on the Azure VM.
-6.  **Identity Check:** 
-    *   The Helper App checks "Who am I?" (e.g., `whoami /upn`).
-    *   It retrieves the logged-in user's email (e.g., `user@company.com`).
-7.  **Context Retrieval (The Pull):** 
-    *   The Helper App calls the Infinity Portal API (or the secure DB directly): "I am `user@company.com`, what is my connection target?"
-    *   The API returns the encrypted payload.
-8.  **Connection:** 
-    *   Helper App decrypts the payload and launches Smart Console.
-
-**Benefits:**
-*   **Zero Clicks:** User clicks once in the portal, and the app opens. No file downloads.
-*   **Secure:** Credentials are never passed through the client-side browser URL or RDP file.
-*   **Standard:** Uses standard AVD Web Client features without hacks.
-
-**Requirements:**
-*   **Identity Sync:** The user email in Infinity Portal must match the Azure AD UPN used for AVD.
-*   **API Access:** The Azure VM needs network access to the Infinity Portal API (or the Context Store).
+### Challenge 3: "Pull" Model Latency
+**Problem:** User clicks "Connect", then launches app. What if they launch the app *before* clicking connect?
+**Solution:**
+*   The Launcher should have a simple UI.
+*   If no PENDING request is found, the Launcher displays: *"No pending connection found. Please initiate a connection from the Infinity Portal."*
+*   It can include a "Refresh" button to poll the queue again.
 
 ## 5. User Experience Validation (Based on Smart-1 Cloud)
 
