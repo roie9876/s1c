@@ -194,33 +194,33 @@ try {
         if (Test-Path $SmartConsolePath) {
             Write-Host "[DEBUG] Launching from: $SmartConsoleDir" -ForegroundColor Cyan
             
-            # Method 5: Direct Invocation with Call Operator (&)
-            # This avoids Start-Process argument parsing issues and passes arguments directly.
+            # Method 8: CMD /C START (Detached Shell Execute)
+            # This mimics double-clicking the icon by asking Windows Explorer to handle the launch.
+            # It bypasses issues where the parent process (PowerShell/CMD) is restricted from spawning the child directly.
+            
+            Write-Host "[ACTION] Launching SmartConsole via Windows Shell..." -ForegroundColor Green
             
             try {
-                Push-Location $SmartConsoleDir
+                # Construct the command for CMD.EXE
+                # Syntax: cmd /c start "" "PathToExe" -args
+                # We need careful quoting here.
                 
-                # Define arguments as an array. PowerShell handles quoting automatically for each element.
-                $Arguments = @("-p", $Password, "-u", $Username, "-s", $TargetIp)
+                $CmdArgs = "/c start `"`" `"$SmartConsolePath`" -p `"$Password`" -u `"$Username`" -s `"$TargetIp`""
                 
-                Write-Host "[ACTION] Launching SmartConsole..." -ForegroundColor Green
+                Write-Host "[DEBUG] Command: cmd $CmdArgs" -ForegroundColor Gray
                 
-                # Execute using the Call Operator
-                & .\SmartConsole.exe @Arguments
+                Start-Process "cmd.exe" -ArgumentList $CmdArgs
                 
-                Write-Host "[INFO] Launch command executed." -ForegroundColor Green
+                Write-Host "[SUCCESS] Launch command issued to Windows Shell." -ForegroundColor Green
+                Write-Host "[INFO] If the window still closes, check Windows Event Viewer > Application Logs." -ForegroundColor Yellow
                 
-                # Check if it exited immediately (only works if we can capture the process, but & returns void for GUI usually)
-                # We'll rely on the user seeing the window.
-                
-                Pop-Location
             } catch {
                 Write-Host "[ERROR] Failed to start process: $_" -ForegroundColor Red
             }
             
             Write-Host "`nTroubleshooting:" -ForegroundColor Yellow
-            Write-Host "1. Copy and run this EXACT command in a PowerShell window:" -ForegroundColor White
-            Write-Host "& `"$SmartConsolePath`" -p `"$Password`" -u `"$Username`" -s `"$TargetIp`"" -ForegroundColor White
+            Write-Host "1. Try running this command in CMD (it uses the 'start' command to detach):" -ForegroundColor White
+            Write-Host "   start `"`" `"$SmartConsolePath`" -p `"$Password`" -u `"$Username`" -s `"$TargetIp`"" -ForegroundColor White
         } else {
             Write-Host "[ERROR] SmartConsole not found at: $SmartConsolePath" -ForegroundColor Red
         }
