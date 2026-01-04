@@ -228,23 +228,27 @@ try {
             
             try {
                 # Launch SmartConsole pointing to the XML file
-                # We use Start-Process to ensure it detaches properly
-                $Process = Start-Process -FilePath $SmartConsolePath -ArgumentList "-p `"$LoginXmlPath`"" -WorkingDirectory $SmartConsoleDir -PassThru
+                # Capture stdout/stderr to help diagnose why it exits
+                $StdOutPath = "$env:TEMP\SmartConsole_stdout_$($PID).log"
+                $StdErrPath = "$env:TEMP\SmartConsole_stderr_$($PID).log"
+                
+                $Process = Start-Process -FilePath $SmartConsolePath -ArgumentList "-p `"$LoginXmlPath`"" -WorkingDirectory $SmartConsoleDir -PassThru -RedirectStandardOutput $StdOutPath -RedirectStandardError $StdErrPath
                 
                 if ($Process) {
                     Write-Host "[SUCCESS] SmartConsole launched (PID: $($Process.Id))." -ForegroundColor Green
+                    Write-Host "[INFO] stdout -> $StdOutPath" -ForegroundColor Gray
+                    Write-Host "[INFO] stderr -> $StdErrPath" -ForegroundColor Gray
                     
-                    # Wait a few seconds to ensure it reads the file
-                    Start-Sleep -Seconds 5
+                    # Wait up to 20s to see if the process exits and capture the exit code
+                    $null = Wait-Process -Id $Process.Id -Timeout 20 -ErrorAction SilentlyContinue
                     
-                    # Optional: Clean up the XML file (Security Best Practice)
-                    # In a real deployment, you might want to wait longer or use a scheduled task to delete it.
-                    # For now, we'll leave it or delete it if the process is stable.
-                    if (-not $Process.HasExited) {
-                        # Remove-Item -Path $LoginXmlPath -Force
-                        Write-Host "[INFO] XML file preserved for debugging. (Ideally delete this in production)" -ForegroundColor Gray
+                    if ($Process.HasExited) {
+                        Write-Host "[ERROR] Process exited. ExitCode=$($Process.ExitCode)" -ForegroundColor Red
+                        if (Test-Path $StdErrPath) { Write-Host "[DEBUG] stderr contents:" -ForegroundColor Yellow; Get-Content $StdErrPath }
+                        if (Test-Path $StdOutPath) { Write-Host "[DEBUG] stdout contents:" -ForegroundColor Yellow; Get-Content $StdOutPath }
                     } else {
-                        Write-Host "[ERROR] Process exited immediately." -ForegroundColor Red
+                        Write-Host "[INFO] Process still running after 20s; leaving XML for debugging." -ForegroundColor Gray
+                        # Remove-Item -Path $LoginXmlPath -Force
                     }
                 }
             } catch {
