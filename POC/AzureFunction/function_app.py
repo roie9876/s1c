@@ -135,7 +135,8 @@ def download_launcher(req: func.HttpRequest) -> func.HttpResponse:
 #>
 
 param (
-    [string]$OverrideUser = ""
+    # [PoC Shortcut] Defaulting to the hardcoded Portal user so you don't have to type it every time
+    [string]$OverrideUser = "roie@mssp.com"
 )
 
 # --- CONFIGURATION ---
