@@ -199,7 +199,7 @@ try {
             
             Write-Host "[ACTION] Creating Login Parameter File..." -ForegroundColor Green
             
-            $LoginXmlPath = "$env:TEMP\SmartConsoleLogin_$($ProcessId).xml"
+            $LoginXmlPath = "$env:TEMP\SmartConsoleLogin_$($PID).xml"
             
             # Construct the XML content
             # Note: We escape special XML characters in the password just in case
