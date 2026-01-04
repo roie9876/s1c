@@ -3,6 +3,11 @@ import uuid
 import datetime
 import requests
 import json
+import os
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 app = Flask(__name__)
 app.secret_key = 'supersecretkey'  # Needed for flash messages
@@ -20,7 +25,8 @@ CUSTOMERS = [
     {"id": "cust_1", "name": "Acme Corp (Firewall A)", "ip": "10.0.1.5", "user": "admin"},
     {"id": "cust_2", "name": "Globex Inc (Firewall B)", "ip": "192.168.10.20", "user": "admin"},
     {"id": "cust_3", "name": "Soylent Corp (Firewall C)", "ip": "172.16.0.5", "user": "readonly"},
-    {"id": "cust_4", "name": "Real Test (Azure VM)", "ip": "20.240.218.22", "user": "cp1", "password": "VMware1!VMware1!"}
+    {"id": "cust_4", "name": "Real Test (Azure VM) - cp1", "ip": "20.240.218.22", "user": "cp1", "password": os.getenv("CP1_PASSWORD")},
+    {"id": "cust_5", "name": "Real Test (Azure VM) - Admin", "ip": "20.240.218.22", "user": "admin", "password": os.getenv("ADMIN_PASSWORD")}
 ]
 
 @app.route('/')
