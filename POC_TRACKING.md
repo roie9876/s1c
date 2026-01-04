@@ -27,6 +27,7 @@ This document tracks the state of the Check Point Farm Migration PoC. Use this t
 | **Cosmos DB** | ✅ Active | TTL enabled (60s). Partition Key: `/userId`. |
 | **Launcher.ps1** | ⚠️ Ready to Test | Updated with Prod URL. Needs validation in actual AVD or simulated env. |
 | **Local Portal** | ✅ Fixed | Flask App. **Issue:** Port 5000/8080 conflict. Moving to port 5001. |
+| **AVD Environment** | ✅ Verified | Clipboard fixed. **End-to-End Test Passed:** Launcher retrieved context and started app. |
 
 ## Recent Actions
 1.  Provisioned Azure Resources in `eastus2`.
@@ -36,12 +37,15 @@ This document tracks the state of the Check Point Farm Migration PoC. Use this t
 5.  Updated `LocalPortal/templates/index.html` with a proper UI (Flash messages, History).
 6.  Changed Local Portal port to **5001** to avoid 403 errors.
 7.  Updated `LocalPortal/app.py` to handle HTTP 201 responses from Azure.
-8.  Added `/download_launcher` endpoint to Azure Function to simplify AVD deployment.
+8.  Added `/dl` endpoint to Azure Function for easy script download.
+9.  **Verified End-to-End Flow:** Portal -> Azure -> AVD -> Launcher -> App Launch.
+10. **Updated Launcher:** Switched from `notepad.exe` to `SmartConsole.exe` (R81.20 path).
 
 ## Immediate Next Steps
-1.  **Redeploy Azure Function:** Run `func azure functionapp publish s1c-function-11729` to push the new download endpoint.
-2.  **End-to-End Test:**
-    *   Run Portal (Local).
+1.  **Verify SmartConsole Launch:** Download the updated script in AVD and run it.
+2.  **Security Hardening:** Implement authentication for the Azure Function (currently Anonymous).
+    *   **AVD:** Copy `Launcher.ps1` to VM and run it.
+    *   **Verify:** Notepad opens with the correct IP/User.
     *   Run Launcher (Local PowerShell).
     *   Verify "Connect" click -> Cosmos DB entry -> Launcher retrieval.
 3.  **Refinement:** Add better error handling to `Launcher.ps1` if the backend is down.

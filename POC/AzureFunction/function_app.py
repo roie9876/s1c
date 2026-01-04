@@ -182,11 +182,18 @@ try {
         
         Write-Host "[ACTION] Launching Application..." -ForegroundColor Green
         
-        $Args = "Target=$TargetIp User=$Username"
-        Start-Process "notepad.exe" -ArgumentList $Args
+        # $Args = "Target=$TargetIp User=$Username"
+        # Start-Process "notepad.exe" -ArgumentList $Args
         
-        # Real Implementation Example:
-        # Start-Process "C:\Program Files (x86)\CheckPoint\SmartConsole\R81.20\PROGRAM\SmartConsole.exe" -ArgumentList "-p $Password -u $Username -t $TargetIp"
+        # Real Implementation:
+        # Adjust the path below to match your specific SmartConsole version (e.g., R81.10, R81.20)
+        $SmartConsolePath = "C:\Program Files (x86)\CheckPoint\SmartConsole\R81.20\PROGRAM\SmartConsole.exe"
+        
+        if (Test-Path $SmartConsolePath) {
+            Start-Process $SmartConsolePath -ArgumentList "-p $Password -u $Username -s $TargetIp"
+        } else {
+            Write-Host "[ERROR] SmartConsole not found at: $SmartConsolePath" -ForegroundColor Red
+        }
         
     }
 }
