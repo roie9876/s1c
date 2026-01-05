@@ -57,6 +57,10 @@ This is the intended PoC entry point for Azure Virtual Desktop.
 - Publish a RemoteApp for:
     - `C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe`
     - Command line (current VM image): `-NoProfile -ExecutionPolicy Bypass -Command "& 'C:\\sc1\\LuancherRunner.ps1'"`
+
+- Alternative (recommended if the PowerShell window has keyboard/input issues):
+    - `C:\\Windows\\System32\\cmd.exe`
+    - Command line: `/c C:\\S1C\\LauncherRunner.cmd`
 - The runner downloads the latest launcher from `GET /api/dl` into `%TEMP%\\s1c-launcher\\Launcher.ps1` and runs it.
 
 Logs on the session host:
