@@ -23,7 +23,7 @@ DEFAULT_API_BASE_URL = "https://s1c-function-11729.azurewebsites.net/api"
 DEFAULT_SMARTCONSOLE_PATH = r"C:\Program Files (x86)\CheckPoint\SmartConsole\R82\PROGRAM\SmartConsole.exe"
 DEFAULT_SMARTCONSOLE_DIR = r"C:\Program Files (x86)\CheckPoint\SmartConsole\R82\PROGRAM"
 
-LAUNCHER_VERSION = "2026-01-05-autofill8"
+LAUNCHER_VERSION = "2026-01-05-autofill9"
 
 
 def _now_iso() -> str:
@@ -466,6 +466,140 @@ def send_ctrl_a_and_delete() -> None:
     send_vk(VK_DELETE)
 
 
+def send_ctrl_v() -> None:
+    VK_CONTROL = 0x11
+    VK_V = 0x56
+    send_vk_down(VK_CONTROL)
+    send_vk(VK_V)
+    send_vk_up(VK_CONTROL)
+
+
+def _get_clipboard_text() -> str:
+    user32 = ctypes.WinDLL("user32", use_last_error=True)
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+
+    CF_UNICODETEXT = 13
+
+    OpenClipboard = user32.OpenClipboard
+    OpenClipboard.argtypes = (wintypes.HWND,)
+    OpenClipboard.restype = wintypes.BOOL
+
+    CloseClipboard = user32.CloseClipboard
+    CloseClipboard.argtypes = ()
+    CloseClipboard.restype = wintypes.BOOL
+
+    GetClipboardData = user32.GetClipboardData
+    GetClipboardData.argtypes = (wintypes.UINT,)
+    GetClipboardData.restype = wintypes.HANDLE
+
+    GlobalLock = kernel32.GlobalLock
+    GlobalLock.argtypes = (wintypes.HGLOBAL,)
+    GlobalLock.restype = wintypes.LPVOID
+
+    GlobalUnlock = kernel32.GlobalUnlock
+    GlobalUnlock.argtypes = (wintypes.HGLOBAL,)
+    GlobalUnlock.restype = wintypes.BOOL
+
+    if not OpenClipboard(0):
+        return ""
+    try:
+        h = GetClipboardData(CF_UNICODETEXT)
+        if not h:
+            return ""
+        p = GlobalLock(h)
+        if not p:
+            return ""
+        try:
+            return ctypes.wstring_at(p)
+        finally:
+            GlobalUnlock(h)
+    finally:
+        CloseClipboard()
+
+
+def _set_clipboard_text(text: str) -> None:
+    user32 = ctypes.WinDLL("user32", use_last_error=True)
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+
+    CF_UNICODETEXT = 13
+    GMEM_MOVEABLE = 0x0002
+
+    OpenClipboard = user32.OpenClipboard
+    OpenClipboard.argtypes = (wintypes.HWND,)
+    OpenClipboard.restype = wintypes.BOOL
+
+    CloseClipboard = user32.CloseClipboard
+    CloseClipboard.argtypes = ()
+    CloseClipboard.restype = wintypes.BOOL
+
+    EmptyClipboard = user32.EmptyClipboard
+    EmptyClipboard.argtypes = ()
+    EmptyClipboard.restype = wintypes.BOOL
+
+    SetClipboardData = user32.SetClipboardData
+    SetClipboardData.argtypes = (wintypes.UINT, wintypes.HANDLE)
+    SetClipboardData.restype = wintypes.HANDLE
+
+    GlobalAlloc = kernel32.GlobalAlloc
+    GlobalAlloc.argtypes = (wintypes.UINT, ctypes.c_size_t)
+    GlobalAlloc.restype = wintypes.HGLOBAL
+
+    GlobalLock = kernel32.GlobalLock
+    GlobalLock.argtypes = (wintypes.HGLOBAL,)
+    GlobalLock.restype = wintypes.LPVOID
+
+    GlobalUnlock = kernel32.GlobalUnlock
+    GlobalUnlock.argtypes = (wintypes.HGLOBAL,)
+    GlobalUnlock.restype = wintypes.BOOL
+
+    data = (text or "")
+    # include null terminator
+    size = (len(data) + 1) * ctypes.sizeof(wintypes.WCHAR)
+
+    if not OpenClipboard(0):
+        raise RuntimeError(f"OpenClipboard failed last_error={ctypes.get_last_error()}")
+    try:
+        if not EmptyClipboard():
+            raise RuntimeError(f"EmptyClipboard failed last_error={ctypes.get_last_error()}")
+        hglob = GlobalAlloc(GMEM_MOVEABLE, size)
+        if not hglob:
+            raise RuntimeError(f"GlobalAlloc failed last_error={ctypes.get_last_error()}")
+        p = GlobalLock(hglob)
+        if not p:
+            raise RuntimeError(f"GlobalLock failed last_error={ctypes.get_last_error()}")
+        try:
+            ctypes.memmove(p, ctypes.create_unicode_buffer(data), size)
+        finally:
+            GlobalUnlock(hglob)
+        if not SetClipboardData(CF_UNICODETEXT, hglob):
+            raise RuntimeError(f"SetClipboardData failed last_error={ctypes.get_last_error()}")
+        # After SetClipboardData, system owns the memory; do not free.
+    finally:
+        CloseClipboard()
+
+
+def paste_text(text: str, log=None) -> None:
+    """Paste text into the focused field using clipboard + Ctrl+V."""
+    previous = ""
+    try:
+        previous = _get_clipboard_text()
+    except Exception as exc:
+        if log:
+            log(f"Clipboard read failed: {exc}")
+
+    try:
+        _set_clipboard_text(text)
+        time.sleep(0.05)
+        send_ctrl_v()
+    finally:
+        # Best-effort restore.
+        try:
+            _set_clipboard_text(previous)
+        except Exception as exc:
+            if log:
+                log(f"Clipboard restore failed: {exc}")
+
+
 def send_text_unicode(text: str) -> None:
     user32 = ctypes.WinDLL("user32", use_last_error=True)
 
@@ -663,7 +797,7 @@ def try_autofill_smartconsole(username: str | None, target_ip: str | None, log) 
                     log(f"Clear username failed: {exc}")
 
                 if username:
-                    send_text_vk(str(username), log=log)
+                    paste_text(str(username), log=log)
                 time.sleep(t_between_keys)
                 send_vk(0x09)  # VK_TAB
                 time.sleep(t_between_keys)
@@ -678,7 +812,7 @@ def try_autofill_smartconsole(username: str | None, target_ip: str | None, log) 
                     log(f"Clear server failed: {exc}")
 
                 if target_ip:
-                    send_text_vk(str(target_ip), log=log)
+                    paste_text(str(target_ip), log=log)
                 log("Autofill attempted via SendInput (click+type)")
                 return True
             except Exception as exc:
