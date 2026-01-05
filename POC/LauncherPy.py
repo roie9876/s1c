@@ -23,7 +23,7 @@ DEFAULT_API_BASE_URL = "https://s1c-function-11729.azurewebsites.net/api"
 DEFAULT_SMARTCONSOLE_PATH = r"C:\Program Files (x86)\CheckPoint\SmartConsole\R82\PROGRAM\SmartConsole.exe"
 DEFAULT_SMARTCONSOLE_DIR = r"C:\Program Files (x86)\CheckPoint\SmartConsole\R82\PROGRAM"
 
-LAUNCHER_VERSION = "2026-01-05-autofill12"
+LAUNCHER_VERSION = "2026-01-05-displayonly2"
 
 
 def _now_iso() -> str:
@@ -178,14 +178,35 @@ def pause_seconds(seconds: int, log=None) -> None:
 
 
 def pause_for_keypress_windows(log=None) -> None:
-    """Best-effort 'press any key' pause using cmd.exe. Safe fallback to short sleep."""
+    """Best-effort 'press any key' pause.
+
+    Avoid spawning a new cmd.exe window (RemoteApp can flash/open-and-close). If no console is
+    attached, fall back to a MessageBox.
+    """
     try:
-        completed = subprocess.run(["cmd.exe", "/c", "pause"], check=False)
-        if log:
-            log(f"pause cmd rc={completed.returncode}")
+        has_tty = bool(getattr(sys.stdin, "isatty", lambda: False)()) and bool(getattr(sys.stdout, "isatty", lambda: False)())
+    except Exception:
+        has_tty = False
+
+    if has_tty:
+        try:
+            import msvcrt  # type: ignore
+
+            print("Press any key to continue...", flush=True)
+            msvcrt.getch()
+            return
+        except Exception as exc:
+            if log:
+                log(f"pause keypress failed: {exc}")
+
+    # No usable console: show a modal dialog as a last resort.
+    try:
+        user32 = ctypes.WinDLL("user32", use_last_error=True)
+        MB_OK = 0x00000000
+        user32.MessageBoxW(None, "Click OK to continue...", "S1C Launcher", MB_OK)
     except Exception as exc:
         if log:
-            log(f"pause cmd failed: {exc}")
+            log(f"pause MessageBox failed: {exc}")
         time.sleep(10)
 
 
@@ -1011,6 +1032,11 @@ def main() -> int:
         action="store_true",
         help="Pause with 'Press any key to continue...' after printing connection/env",
     )
+    parser.add_argument(
+        "--display-only",
+        action="store_true",
+        help="Fetch and display connection details only (do not launch SmartConsole)",
+    )
     parser.add_argument("--wait-seconds-if-no-request", type=int, default=0, help="If >0, wait before exit when no request found")
     args = parser.parse_args()
 
@@ -1108,6 +1134,11 @@ def main() -> int:
             pause_seconds(args.pause_seconds_after_display, log=log)
         if args.pause_after_display:
             pause_for_keypress_windows(log=log)
+
+    # If requested, stop here (no SmartConsole launch).
+    if args.display_only:
+        log("Display-only mode: skipping SmartConsole launch")
+        return 0
 
     if not os.path.exists(args.smartconsole_path):
         print(f"[ERROR] SmartConsole not found at: {args.smartconsole_path}")
