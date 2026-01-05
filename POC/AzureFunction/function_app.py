@@ -124,6 +124,25 @@ function Write-Log([string]$Message) {
 }
 Write-Log "Launcher started"
 
+# SendKeys is most reliable from an STA PowerShell process.
+try {
+    $apt = [System.Threading.Thread]::CurrentThread.ApartmentState
+    Write-Log "ApartmentState=$apt"
+    if ($apt -ne 'STA') {
+        Write-Host "[INFO] Relaunching in STA mode for UI automation..." -ForegroundColor Cyan
+        Write-Log "Relaunching in STA mode"
+        $argsList = @('-NoProfile','-STA','-ExecutionPolicy','Bypass','-File', $PSCommandPath)
+        if ($OverrideUser -and $OverrideUser.Trim().Length -gt 0) {
+            $argsList += @('-OverrideUser', $OverrideUser)
+        }
+        $p2 = Start-Process -FilePath 'powershell.exe' -ArgumentList $argsList -Wait -PassThru
+        exit $p2.ExitCode
+    }
+} catch {
+    # If detection fails, continue.
+    Write-Log "ApartmentState detection failed: $($_.Exception.Message)"
+}
+
 # Identify user
 if ($OverrideUser -and $OverrideUser.Trim().Length -gt 0) {
     $CurrentUserId = $OverrideUser
@@ -187,13 +206,37 @@ public static class Win32Foreground {
     [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);
 }
 "@
+    # Extra activation attempts help in RemoteApp sessions.
+    try {
+        Add-Type @"
+using System;
+using System.Runtime.InteropServices;
+public static class Win32Show {
+    [DllImport("user32.dll")] public static extern bool ShowWindowAsync(IntPtr hWnd, int nCmdShow);
+}
+"@
+        [Win32Show]::ShowWindowAsync($handle, 9) | Out-Null  # SW_RESTORE
+    } catch {}
     [Win32Foreground]::SetForegroundWindow($handle) | Out-Null
-    Start-Sleep -Milliseconds 500
+    Start-Sleep -Milliseconds 750
 
     # Prefill username and server; leave password blank
     Add-Type -AssemblyName System.Windows.Forms
-    $keys = "$Username{TAB}{TAB}$TargetIp"
-    [System.Windows.Forms.SendKeys]::SendWait($keys)
+    # Some SmartConsole builds have slightly different tab order; retry with a couple variants.
+    $keyVariants = @(
+        "$Username{TAB}{TAB}$TargetIp",
+        "$Username{TAB}$TargetIp"
+    )
+    foreach ($k in $keyVariants) {
+        try {
+            Write-Log "Sending keys variant: $k"
+            [System.Windows.Forms.SendKeys]::SendWait($k)
+            Start-Sleep -Milliseconds 300
+            break
+        } catch {
+            Write-Log "SendKeys failed: $($_.Exception.Message)"
+        }
+    }
     Write-Host "[INFO] Prefilled username/server; please type password and click Login." -ForegroundColor Cyan
     Write-Log "Prefilled fields via SendKeys"
 
