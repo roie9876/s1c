@@ -109,6 +109,22 @@ def http_get_json(url: str, timeout_s: int, log):
         raise
 
 
+def is_image_running(image_name: str) -> bool:
+    """Best-effort process check without external deps (uses tasklist)."""
+    try:
+        completed = subprocess.run(
+            ["tasklist", "/FI", f"IMAGENAME eq {image_name}"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+        out = (completed.stdout or "") + "\n" + (completed.stderr or "")
+        return image_name.lower() in out.lower()
+    except Exception:
+        return False
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="S1C Python launcher (PowerShell-free).")
     parser.add_argument("--api-base-url", default=DEFAULT_API_BASE_URL)
@@ -205,13 +221,24 @@ def main() -> int:
         time.sleep(10)
         return 1
 
-    # If it exits immediately, surface exit code for troubleshooting.
+    # SmartConsole sometimes spawns a child process then the parent exits quickly.
+    # For RemoteApp, we must keep this launcher process alive while SmartConsole is open.
     time.sleep(5)
     if proc.poll() is not None:
         rc = proc.returncode
+        log(f"SmartConsole parent exited quickly rc={rc}")
+
+        # If SmartConsole UI is still running under a different process, wait on it.
+        if is_image_running("SmartConsole.exe"):
+            print("[INFO] SmartConsole is running (child process); keeping launcher alive...")
+            log("Detected SmartConsole.exe still running; entering wait loop")
+            while is_image_running("SmartConsole.exe"):
+                time.sleep(2)
+            log("SmartConsole.exe no longer running")
+            return 0
+
         print(f"[WARN] SmartConsole exited quickly (rc={rc}).")
         print("       Check %TEMP%\\s1c-launcher\\LauncherPy.log and Windows Event Viewer (Application).")
-        log(f"SmartConsole exited quickly rc={rc}")
         return 1
 
     print("[INFO] Waiting for SmartConsole to exit...")
