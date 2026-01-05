@@ -11,12 +11,19 @@ import urllib.request
 import ctypes
 from ctypes import wintypes
 
+# Patch for missing ULONG_PTR in some Python environments (e.g. 3.13 on Windows)
+if not hasattr(wintypes, "ULONG_PTR"):
+    if ctypes.sizeof(ctypes.c_void_p) == 8:
+        wintypes.ULONG_PTR = ctypes.c_uint64
+    else:
+        wintypes.ULONG_PTR = ctypes.c_ulong
+
 
 DEFAULT_API_BASE_URL = "https://s1c-function-11729.azurewebsites.net/api"
 DEFAULT_SMARTCONSOLE_PATH = r"C:\Program Files (x86)\CheckPoint\SmartConsole\R82\PROGRAM\SmartConsole.exe"
 DEFAULT_SMARTCONSOLE_DIR = r"C:\Program Files (x86)\CheckPoint\SmartConsole\R82\PROGRAM"
 
-LAUNCHER_VERSION = "2026-01-05-autofill2"
+LAUNCHER_VERSION = "2026-01-05-autofill3"
 
 
 def _now_iso() -> str:
