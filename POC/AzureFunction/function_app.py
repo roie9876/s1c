@@ -124,6 +124,64 @@ function Write-Log([string]$Message) {
 }
 Write-Log "Launcher started"
 
+# First-run bootstrap: in production users may only ever launch RemoteApps (no full desktop login).
+# Some applications (and some profiles/FSLogix configurations) expect common profile folders to exist.
+function Ensure-Dir([string]$Path) {
+    if (-not $Path) { return }
+    try {
+        if (-not (Test-Path -LiteralPath $Path)) {
+            New-Item -Path $Path -ItemType Directory -Force | Out-Null
+        }
+    } catch {
+        Write-Log "Ensure-Dir failed path='$Path' err='$($_.Exception.Message)'"
+    }
+}
+
+function Bootstrap-UserProfile {
+    try {
+        $localAppData = [Environment]::GetFolderPath('LocalApplicationData')
+        if (-not $localAppData) { $localAppData = $env:LOCALAPPDATA }
+        $sentinelDir = Join-Path $localAppData 's1c'
+        $sentinelFile = Join-Path $sentinelDir 'profile_bootstrap_v1.done'
+
+        if (Test-Path -LiteralPath $sentinelFile) {
+            Write-Log "Bootstrap already done: $sentinelFile"
+            return
+        }
+
+        Ensure-Dir $sentinelDir
+
+        # Touch common shell folders
+        $paths = @(
+            [Environment]::GetFolderPath('UserProfile'),
+            [Environment]::GetFolderPath('ApplicationData'),
+            [Environment]::GetFolderPath('LocalApplicationData'),
+            [Environment]::GetFolderPath('MyDocuments'),
+            $env:TEMP,
+            $env:APPDATA,
+            $env:LOCALAPPDATA
+        ) | Where-Object { $_ -and $_.Trim().Length -gt 0 } | Select-Object -Unique
+
+        foreach ($p in $paths) { Ensure-Dir $p }
+
+        # Best-effort: pre-create common Check Point folders under the user profile.
+        $cpCandidates = @(
+            (Join-Path $env:APPDATA 'Check Point'),
+            (Join-Path $env:LOCALAPPDATA 'Check Point'),
+            (Join-Path $env:APPDATA 'CheckPoint'),
+            (Join-Path $env:LOCALAPPDATA 'CheckPoint')
+        )
+        foreach ($p in $cpCandidates) { Ensure-Dir $p }
+
+        Set-Content -Path $sentinelFile -Value "$(Get-Date -Format s)" -Encoding UTF8 -Force
+        Write-Log "Bootstrap complete: $sentinelFile"
+    } catch {
+        Write-Log "Bootstrap-UserProfile failed: $($_.Exception.Message)"
+    }
+}
+
+Bootstrap-UserProfile
+
 # Diagnostics: helps compare cp1 vs cp2 (terminal host, session host VM, etc.)
 try {
     $isWt = $false
