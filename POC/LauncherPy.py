@@ -23,7 +23,7 @@ DEFAULT_API_BASE_URL = "https://s1c-function-11729.azurewebsites.net/api"
 DEFAULT_SMARTCONSOLE_PATH = r"C:\Program Files (x86)\CheckPoint\SmartConsole\R82\PROGRAM\SmartConsole.exe"
 DEFAULT_SMARTCONSOLE_DIR = r"C:\Program Files (x86)\CheckPoint\SmartConsole\R82\PROGRAM"
 
-LAUNCHER_VERSION = "2026-01-05-autofill4"
+LAUNCHER_VERSION = "2026-01-05-autofill5"
 
 
 def _now_iso() -> str:
@@ -201,7 +201,7 @@ def click_relative(hwnd: int, x_ratio: float, y_ratio: float) -> None:
     """Clicks inside a window at a relative coordinate (0..1). Best-effort."""
     if not hwnd:
         return
-    user32 = ctypes.windll.user32
+    user32 = ctypes.WinDLL("user32", use_last_error=True)
 
     class RECT(ctypes.Structure):
         _fields_ = [("left", wintypes.LONG), ("top", wintypes.LONG), ("right", wintypes.LONG), ("bottom", wintypes.LONG)]
@@ -232,8 +232,28 @@ def click_relative(hwnd: int, x_ratio: float, y_ratio: float) -> None:
             ("dwExtraInfo", wintypes.ULONG_PTR),
         ]
 
+    class KEYBDINPUT(ctypes.Structure):
+        _fields_ = [
+            ("wVk", wintypes.WORD),
+            ("wScan", wintypes.WORD),
+            ("dwFlags", wintypes.DWORD),
+            ("time", wintypes.DWORD),
+            ("dwExtraInfo", wintypes.ULONG_PTR),
+        ]
+
+    class HARDWAREINPUT(ctypes.Structure):
+        _fields_ = [("uMsg", wintypes.DWORD), ("wParamL", wintypes.WORD), ("wParamH", wintypes.WORD)]
+
+    class _INPUT_UNION(ctypes.Union):
+        _fields_ = [("mi", MOUSEINPUT), ("ki", KEYBDINPUT), ("hi", HARDWAREINPUT)]
+
     class INPUT(ctypes.Structure):
-        _fields_ = [("type", wintypes.DWORD), ("mi", MOUSEINPUT)]
+        _anonymous_ = ("u",)
+        _fields_ = [("type", wintypes.DWORD), ("u", _INPUT_UNION)]
+
+    SendInput = user32.SendInput
+    SendInput.argtypes = (wintypes.UINT, ctypes.POINTER(INPUT), ctypes.c_int)
+    SendInput.restype = wintypes.UINT
 
     # Convert to absolute (0..65535)
     screen_w = user32.GetSystemMetrics(0)
@@ -251,14 +271,28 @@ def click_relative(hwnd: int, x_ratio: float, y_ratio: float) -> None:
     ]
     arr_type = INPUT * len(seq)
     arr = arr_type(*seq)
-    user32.SendInput(len(seq), ctypes.byref(arr), ctypes.sizeof(INPUT))
+    ctypes.set_last_error(0)
+    sent = SendInput(len(seq), arr, ctypes.sizeof(INPUT))
+    if sent != len(seq):
+        err = ctypes.get_last_error()
+        raise RuntimeError(f"SendInput(mouse) sent={sent}/{len(seq)} last_error={err}")
 
 
 def send_vk(vk: int) -> None:
-    user32 = ctypes.windll.user32
+    user32 = ctypes.WinDLL("user32", use_last_error=True)
 
     INPUT_KEYBOARD = 1
     KEYEVENTF_KEYUP = 0x0002
+
+    class MOUSEINPUT(ctypes.Structure):
+        _fields_ = [
+            ("dx", wintypes.LONG),
+            ("dy", wintypes.LONG),
+            ("mouseData", wintypes.DWORD),
+            ("dwFlags", wintypes.DWORD),
+            ("time", wintypes.DWORD),
+            ("dwExtraInfo", wintypes.ULONG_PTR),
+        ]
 
     class KEYBDINPUT(ctypes.Structure):
         _fields_ = [
@@ -269,8 +303,19 @@ def send_vk(vk: int) -> None:
             ("dwExtraInfo", wintypes.ULONG_PTR),
         ]
 
+    class HARDWAREINPUT(ctypes.Structure):
+        _fields_ = [("uMsg", wintypes.DWORD), ("wParamL", wintypes.WORD), ("wParamH", wintypes.WORD)]
+
+    class _INPUT_UNION(ctypes.Union):
+        _fields_ = [("mi", MOUSEINPUT), ("ki", KEYBDINPUT), ("hi", HARDWAREINPUT)]
+
     class INPUT(ctypes.Structure):
-        _fields_ = [("type", wintypes.DWORD), ("ki", KEYBDINPUT)]
+        _anonymous_ = ("u",)
+        _fields_ = [("type", wintypes.DWORD), ("u", _INPUT_UNION)]
+
+    SendInput = user32.SendInput
+    SendInput.argtypes = (wintypes.UINT, ctypes.POINTER(INPUT), ctypes.c_int)
+    SendInput.restype = wintypes.UINT
 
     down = INPUT(type=INPUT_KEYBOARD, ki=KEYBDINPUT(wVk=vk, wScan=0, dwFlags=0, time=0, dwExtraInfo=0))
     up = INPUT(type=INPUT_KEYBOARD, ki=KEYBDINPUT(wVk=vk, wScan=0, dwFlags=KEYEVENTF_KEYUP, time=0, dwExtraInfo=0))
@@ -278,15 +323,29 @@ def send_vk(vk: int) -> None:
     seq = (down, up)
     arr_type = INPUT * 2
     arr = arr_type(*seq)
-    user32.SendInput(2, ctypes.byref(arr), ctypes.sizeof(INPUT))
+    ctypes.set_last_error(0)
+    sent = SendInput(2, arr, ctypes.sizeof(INPUT))
+    if sent != 2:
+        err = ctypes.get_last_error()
+        raise RuntimeError(f"SendInput(key) sent={sent}/2 last_error={err}")
 
 
 def send_text_unicode(text: str) -> None:
-    user32 = ctypes.windll.user32
+    user32 = ctypes.WinDLL("user32", use_last_error=True)
 
     INPUT_KEYBOARD = 1
     KEYEVENTF_UNICODE = 0x0004
     KEYEVENTF_KEYUP = 0x0002
+
+    class MOUSEINPUT(ctypes.Structure):
+        _fields_ = [
+            ("dx", wintypes.LONG),
+            ("dy", wintypes.LONG),
+            ("mouseData", wintypes.DWORD),
+            ("dwFlags", wintypes.DWORD),
+            ("time", wintypes.DWORD),
+            ("dwExtraInfo", wintypes.ULONG_PTR),
+        ]
 
     class KEYBDINPUT(ctypes.Structure):
         _fields_ = [
@@ -297,8 +356,19 @@ def send_text_unicode(text: str) -> None:
             ("dwExtraInfo", wintypes.ULONG_PTR),
         ]
 
+    class HARDWAREINPUT(ctypes.Structure):
+        _fields_ = [("uMsg", wintypes.DWORD), ("wParamL", wintypes.WORD), ("wParamH", wintypes.WORD)]
+
+    class _INPUT_UNION(ctypes.Union):
+        _fields_ = [("mi", MOUSEINPUT), ("ki", KEYBDINPUT), ("hi", HARDWAREINPUT)]
+
     class INPUT(ctypes.Structure):
-        _fields_ = [("type", wintypes.DWORD), ("ki", KEYBDINPUT)]
+        _anonymous_ = ("u",)
+        _fields_ = [("type", wintypes.DWORD), ("u", _INPUT_UNION)]
+
+    SendInput = user32.SendInput
+    SendInput.argtypes = (wintypes.UINT, ctypes.POINTER(INPUT), ctypes.c_int)
+    SendInput.restype = wintypes.UINT
 
     inputs = []
     for ch in text or "":
@@ -310,7 +380,11 @@ def send_text_unicode(text: str) -> None:
         return
     arr_type = INPUT * len(inputs)
     arr = arr_type(*inputs)
-    user32.SendInput(len(inputs), ctypes.byref(arr), ctypes.sizeof(INPUT))
+    ctypes.set_last_error(0)
+    sent = SendInput(len(inputs), arr, ctypes.sizeof(INPUT))
+    if sent != len(inputs):
+        err = ctypes.get_last_error()
+        raise RuntimeError(f"SendInput(text) sent={sent}/{len(inputs)} last_error={err}")
 
 
 def try_autofill_smartconsole(username: str | None, target_ip: str | None, log) -> bool:
