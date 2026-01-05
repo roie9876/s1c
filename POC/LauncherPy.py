@@ -23,7 +23,7 @@ DEFAULT_API_BASE_URL = "https://s1c-function-11729.azurewebsites.net/api"
 DEFAULT_SMARTCONSOLE_PATH = r"C:\Program Files (x86)\CheckPoint\SmartConsole\R82\PROGRAM\SmartConsole.exe"
 DEFAULT_SMARTCONSOLE_DIR = r"C:\Program Files (x86)\CheckPoint\SmartConsole\R82\PROGRAM"
 
-LAUNCHER_VERSION = "2026-01-05-autofill10"
+LAUNCHER_VERSION = "2026-01-05-autofill11"
 
 
 def _now_iso() -> str:
@@ -118,6 +118,42 @@ def http_get_json(url: str, timeout_s: int, log):
     except Exception as exc:
         log(f"HTTP request failed: {exc}")
         raise
+
+
+def export_connection_to_env(username: str | None, target_ip: str | None, password: str | None, log) -> None:
+    # Process-level env vars (inherited by child processes). Avoid logging sensitive values.
+    if username is not None:
+        os.environ["S1C_USERNAME"] = str(username)
+    if target_ip is not None:
+        os.environ["S1C_TARGET_IP"] = str(target_ip)
+    if password is not None:
+        os.environ["S1C_PASSWORD"] = str(password)
+    log(
+        "Exported connection to process env: "
+        f"S1C_USERNAME={'set' if username else 'empty'} "
+        f"S1C_TARGET_IP={'set' if target_ip else 'empty'} "
+        f"S1C_PASSWORD={'set' if password else 'empty'}"
+    )
+
+
+def persist_env_var_setx(name: str, value: str, log) -> bool:
+    """Persist a user-level environment variable using setx (Windows). Effective for new processes/sessions."""
+    try:
+        completed = subprocess.run(
+            ["setx", name, value],
+            capture_output=True,
+            text=True,
+            timeout=15,
+            check=False,
+        )
+        if completed.returncode != 0:
+            out = (completed.stdout or "") + "\n" + (completed.stderr or "")
+            log(f"setx failed name={name} rc={completed.returncode} out={out.strip()[:200]}")
+            return False
+        return True
+    except Exception as exc:
+        log(f"setx exception name={name}: {exc}")
+        return False
 
 
 def is_image_running(image_name: str) -> bool:
