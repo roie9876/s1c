@@ -23,7 +23,7 @@ DEFAULT_API_BASE_URL = "https://s1c-function-11729.azurewebsites.net/api"
 DEFAULT_SMARTCONSOLE_PATH = r"C:\Program Files (x86)\CheckPoint\SmartConsole\R82\PROGRAM\SmartConsole.exe"
 DEFAULT_SMARTCONSOLE_DIR = r"C:\Program Files (x86)\CheckPoint\SmartConsole\R82\PROGRAM"
 
-LAUNCHER_VERSION = "2026-01-05-autofill9"
+LAUNCHER_VERSION = "2026-01-05-autofill10"
 
 
 def _now_iso() -> str:
@@ -474,6 +474,14 @@ def send_ctrl_v() -> None:
     send_vk_up(VK_CONTROL)
 
 
+def send_ctrl_c() -> None:
+    VK_CONTROL = 0x11
+    VK_C = 0x43
+    send_vk_down(VK_CONTROL)
+    send_vk(VK_C)
+    send_vk_up(VK_CONTROL)
+
+
 def _get_clipboard_text() -> str:
     user32 = ctypes.WinDLL("user32", use_last_error=True)
     kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
@@ -600,6 +608,45 @@ def paste_text(text: str, log=None) -> None:
                 log(f"Clipboard restore failed: {exc}")
 
 
+def paste_text_and_verify(text: str, log) -> bool:
+    """Paste text into focused field, then Ctrl+A/Ctrl+C and verify clipboard contains the text."""
+    previous = ""
+    try:
+        previous = _get_clipboard_text()
+    except Exception as exc:
+        log(f"Verify: clipboard read failed: {exc}")
+
+    ok = False
+    try:
+        _set_clipboard_text(text)
+        time.sleep(0.06)
+        send_ctrl_v()
+        time.sleep(0.12)
+
+        # Try to read back from the field via Ctrl+A / Ctrl+C.
+        send_vk_down(0x11)  # VK_CONTROL
+        send_vk(0x41)       # A
+        send_vk_up(0x11)
+        time.sleep(0.05)
+        send_ctrl_c()
+        time.sleep(0.12)
+
+        try:
+            got = _get_clipboard_text()
+        except Exception as exc:
+            log(f"Verify: clipboard readback failed: {exc}")
+            got = ""
+
+        ok = (text or "") in (got or "")
+        log(f"Verify: expected={repr(text)} got={repr((got or '')[:80])} ok={ok}")
+        return ok
+    finally:
+        try:
+            _set_clipboard_text(previous)
+        except Exception as exc:
+            log(f"Verify: clipboard restore failed: {exc}")
+
+
 def send_text_unicode(text: str) -> None:
     user32 = ctypes.WinDLL("user32", use_last_error=True)
 
@@ -721,28 +768,27 @@ def input_selftest_notepad(log) -> None:
         send_text_vk(test_text, log=log)
         time.sleep(0.4)
 
-        # Read back from classic Notepad edit control (best-effort)
-        user32 = ctypes.windll.user32
-        FindWindowExW = user32.FindWindowExW
-        FindWindowExW.argtypes = [wintypes.HWND, wintypes.HWND, wintypes.LPCWSTR, wintypes.LPCWSTR]
-        FindWindowExW.restype = wintypes.HWND
-        edit = FindWindowExW(wintypes.HWND(hwnd), wintypes.HWND(0), "Edit", None)
-
-        if edit:
-            GetWindowTextLengthW = user32.GetWindowTextLengthW
-            GetWindowTextLengthW.argtypes = [wintypes.HWND]
-            GetWindowTextLengthW.restype = ctypes.c_int
-            GetWindowTextW = user32.GetWindowTextW
-            GetWindowTextW.argtypes = [wintypes.HWND, wintypes.LPWSTR, ctypes.c_int]
-            GetWindowTextW.restype = ctypes.c_int
-
-            ln = int(GetWindowTextLengthW(edit))
-            buf = ctypes.create_unicode_buffer(max(ln + 1, 256))
-            GetWindowTextW(edit, buf, len(buf))
-            got = (buf.value or "")
-            log(f"Selftest: readback len={len(got)} value={repr(got[:80])}")
-        else:
-            log("Selftest: notepad edit control not found")
+        # Read back using clipboard (works for modern Notepad too)
+        try:
+            prev = _get_clipboard_text()
+        except Exception:
+            prev = ""
+        try:
+            send_vk_down(0x11)  # Ctrl
+            send_vk(0x41)       # A
+            send_vk_up(0x11)
+            time.sleep(0.05)
+            send_ctrl_c()
+            time.sleep(0.12)
+            got = _get_clipboard_text()
+            log(f"Selftest: clipboard readback value={repr((got or '')[:80])}")
+        except Exception as exc:
+            log(f"Selftest: clipboard readback failed: {exc}")
+        finally:
+            try:
+                _set_clipboard_text(prev)
+            except Exception:
+                pass
 
     finally:
         try:
@@ -777,47 +823,60 @@ def try_autofill_smartconsole(username: str | None, target_ip: str | None, log) 
 
             # Click the Username field area (relative coords tuned for the R82 login UI).
             # This improves reliability in RemoteApp where focus can land elsewhere.
+            username_clicks = [(0.62, 0.23), (0.70, 0.23), (0.75, 0.23)]
+            server_clicks = [(0.62, 0.53), (0.70, 0.53), (0.75, 0.53)]
+
+            # Paste username into the username field with verification.
+            did_user = False
+            if username:
+                for xr, yr in username_clicks:
+                    try:
+                        click_relative(hwnd, x_ratio=xr, y_ratio=yr)
+                        time.sleep(t_after_click)
+                        fg2 = get_foreground_hwnd()
+                        log(f"After username click({xr},{yr}): fg_hwnd={fg2} fg_title='{get_window_title(fg2)}'")
+                        try:
+                            send_ctrl_a_and_delete()
+                            time.sleep(t_between_keys)
+                        except Exception as exc:
+                            log(f"Clear username failed: {exc}")
+                        if paste_text_and_verify(str(username), log=log):
+                            did_user = True
+                            break
+                    except Exception as exc:
+                        log(f"Username click/paste failed: {exc}")
+
+            # Move to server field. Prefer direct click, fallback to tabbing.
             try:
-                click_relative(hwnd, x_ratio=0.70, y_ratio=0.23)
-                time.sleep(t_after_click)
-            except Exception as exc:
-                log(f"Click focus failed: {exc}")
-
-            fg2 = get_foreground_hwnd()
-            log(f"After click: fg_hwnd={fg2} fg_title='{get_window_title(fg2)}'")
-
-            # Type username, then tab to password, tab to server field, then type server.
-            # This matches typical SmartConsole login tab order.
-            try:
-                # Clear username field
-                try:
-                    send_ctrl_a_and_delete()
+                if did_user:
+                    send_vk(0x09)  # tab to password
                     time.sleep(t_between_keys)
-                except Exception as exc:
-                    log(f"Clear username failed: {exc}")
-
-                if username:
-                    paste_text(str(username), log=log)
-                time.sleep(t_between_keys)
-                send_vk(0x09)  # VK_TAB
-                time.sleep(t_between_keys)
-                send_vk(0x09)  # VK_TAB
-                time.sleep(t_between_keys)
-
-                # Clear server field
-                try:
-                    send_ctrl_a_and_delete()
+                    send_vk(0x09)  # tab to server
                     time.sleep(t_between_keys)
-                except Exception as exc:
-                    log(f"Clear server failed: {exc}")
-
-                if target_ip:
-                    paste_text(str(target_ip), log=log)
-                log("Autofill attempted via SendInput (click+type)")
-                return True
             except Exception as exc:
-                log(f"Autofill failed: {exc}")
-                return False
+                log(f"Tab navigation failed: {exc}")
+
+            did_server = False
+            if target_ip:
+                for xr, yr in server_clicks:
+                    try:
+                        click_relative(hwnd, x_ratio=xr, y_ratio=yr)
+                        time.sleep(t_after_click)
+                        fg3 = get_foreground_hwnd()
+                        log(f"After server click({xr},{yr}): fg_hwnd={fg3} fg_title='{get_window_title(fg3)}'")
+                        try:
+                            send_ctrl_a_and_delete()
+                            time.sleep(t_between_keys)
+                        except Exception as exc:
+                            log(f"Clear server failed: {exc}")
+                        if paste_text_and_verify(str(target_ip), log=log):
+                            did_server = True
+                            break
+                    except Exception as exc:
+                        log(f"Server click/paste failed: {exc}")
+
+            log(f"Autofill attempted; did_user={did_user} did_server={did_server}")
+            return bool((not username or did_user) and (not target_ip or did_server))
 
         time.sleep(0.5)
 
