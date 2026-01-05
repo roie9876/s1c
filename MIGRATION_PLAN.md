@@ -124,6 +124,34 @@ Based on the analysis of the network trace (`portal.checkpoint.com.har`), the fl
 
 ## 3. Proposed Architecture (Azure)
 
+### 3.0 Architecture Figure (Infinity Portal + AVD + Function + Cosmos)
+
+```mermaid
+flowchart LR
+    %% High-level architecture + flow
+    U["User"] -->|"1) Click Connect"| P["Infinity Portal (AWS)"]
+
+    subgraph AZ["Azure"]
+        F["Azure Function (Broker API)"]
+        C["Cosmos DB (Connection Requests, TTL)"]
+        F -->|"Write / Update request"| C
+        C -->|"Query latest PENDING"| F
+    end
+
+    P -->|"2) POST /api/connection-request"| F
+
+    subgraph AVD["Azure Virtual Desktop (AVD)"]
+        L["Launcher (RemoteApp)"]
+        S["SmartConsole.exe"]
+        L -->|"6) Start SmartConsole"| S
+    end
+
+    U -->|"3) Launch RemoteApp"| L
+    L -->|"4) GET /api/fetch-connection?userId=..."| F
+    F -->|"5) Return targetIp + username\n(mark request CONSUMED/claimed)"| L
+    L -->|"7) User logs in (PoC: manual password)"| S
+```
+
 ### Core Concept: The "Pull" Model with Connection Queue
 Since we cannot push context via the URL in AVD, and users may have multiple concurrent connections (MSSP scenario), we will implement a **"Connection Request Queue"** pattern.
 
