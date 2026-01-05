@@ -23,7 +23,7 @@ DEFAULT_API_BASE_URL = "https://s1c-function-11729.azurewebsites.net/api"
 DEFAULT_SMARTCONSOLE_PATH = r"C:\Program Files (x86)\CheckPoint\SmartConsole\R82\PROGRAM\SmartConsole.exe"
 DEFAULT_SMARTCONSOLE_DIR = r"C:\Program Files (x86)\CheckPoint\SmartConsole\R82\PROGRAM"
 
-LAUNCHER_VERSION = "2026-01-05-autofill7"
+LAUNCHER_VERSION = "2026-01-05-autofill8"
 
 
 def _now_iso() -> str:
@@ -523,6 +523,100 @@ def send_text_unicode(text: str) -> None:
         raise RuntimeError(f"SendInput(text) sent={sent}/{len(inputs)} last_error={err}")
 
 
+def send_text_vk(text: str, log=None) -> None:
+    """Type text using virtual keys (VkKeyScanW) for better compatibility with some apps."""
+    user32 = ctypes.WinDLL("user32", use_last_error=True)
+
+    VkKeyScanW = user32.VkKeyScanW
+    VkKeyScanW.argtypes = (wintypes.WCHAR,)
+    VkKeyScanW.restype = wintypes.SHORT
+
+    VK_SHIFT = 0x10
+
+    for ch in text or "":
+        code = int(VkKeyScanW(ch))
+        if code == -1:
+            # Fallback to unicode injection for unsupported chars.
+            try:
+                send_text_unicode(ch)
+            except Exception:
+                if log:
+                    log(f"VkKeyScan unsupported char={repr(ch)}")
+            continue
+
+        vk = code & 0xFF
+        shift_state = (code >> 8) & 0xFF
+        need_shift = bool(shift_state & 0x01)
+
+        if need_shift:
+            send_vk_down(VK_SHIFT)
+        send_vk(vk)
+        if need_shift:
+            send_vk_up(VK_SHIFT)
+
+
+def input_selftest_notepad(log) -> None:
+    """Launch Notepad, type text, and read it back to confirm injection works in this session."""
+    try:
+        proc = subprocess.Popen(["notepad.exe"])
+    except Exception as exc:
+        log(f"Selftest: failed to start notepad: {exc}")
+        return
+
+    try:
+        hwnd = 0
+        for _ in range(40):
+            hwnd = try_find_window_handle_by_title("Notepad")
+            if hwnd:
+                break
+            time.sleep(0.25)
+        if not hwnd:
+            log("Selftest: notepad window not found")
+            return
+
+        bring_window_to_foreground(hwnd)
+        time.sleep(0.8)
+        click_relative(hwnd, x_ratio=0.50, y_ratio=0.50)
+        time.sleep(0.3)
+
+        test_text = "S1C-INPUT-TEST"
+        try:
+            send_ctrl_a_and_delete()
+        except Exception:
+            pass
+        send_text_vk(test_text, log=log)
+        time.sleep(0.4)
+
+        # Read back from classic Notepad edit control (best-effort)
+        user32 = ctypes.windll.user32
+        FindWindowExW = user32.FindWindowExW
+        FindWindowExW.argtypes = [wintypes.HWND, wintypes.HWND, wintypes.LPCWSTR, wintypes.LPCWSTR]
+        FindWindowExW.restype = wintypes.HWND
+        edit = FindWindowExW(wintypes.HWND(hwnd), wintypes.HWND(0), "Edit", None)
+
+        if edit:
+            GetWindowTextLengthW = user32.GetWindowTextLengthW
+            GetWindowTextLengthW.argtypes = [wintypes.HWND]
+            GetWindowTextLengthW.restype = ctypes.c_int
+            GetWindowTextW = user32.GetWindowTextW
+            GetWindowTextW.argtypes = [wintypes.HWND, wintypes.LPWSTR, ctypes.c_int]
+            GetWindowTextW.restype = ctypes.c_int
+
+            ln = int(GetWindowTextLengthW(edit))
+            buf = ctypes.create_unicode_buffer(max(ln + 1, 256))
+            GetWindowTextW(edit, buf, len(buf))
+            got = (buf.value or "")
+            log(f"Selftest: readback len={len(got)} value={repr(got[:80])}")
+        else:
+            log("Selftest: notepad edit control not found")
+
+    finally:
+        try:
+            proc.terminate()
+        except Exception:
+            pass
+
+
 def try_autofill_smartconsole(username: str | None, target_ip: str | None, log) -> bool:
     """Best-effort: focus SmartConsole window and type Username + Server/IP (leave password blank)."""
     if not username and not target_ip:
@@ -569,7 +663,7 @@ def try_autofill_smartconsole(username: str | None, target_ip: str | None, log) 
                     log(f"Clear username failed: {exc}")
 
                 if username:
-                    send_text_unicode(str(username))
+                    send_text_vk(str(username), log=log)
                 time.sleep(t_between_keys)
                 send_vk(0x09)  # VK_TAB
                 time.sleep(t_between_keys)
@@ -584,7 +678,7 @@ def try_autofill_smartconsole(username: str | None, target_ip: str | None, log) 
                     log(f"Clear server failed: {exc}")
 
                 if target_ip:
-                    send_text_unicode(str(target_ip))
+                    send_text_vk(str(target_ip), log=log)
                 log("Autofill attempted via SendInput (click+type)")
                 return True
             except Exception as exc:
@@ -604,6 +698,11 @@ def main() -> int:
     parser.add_argument("--smartconsole-path", default=DEFAULT_SMARTCONSOLE_PATH)
     parser.add_argument("--smartconsole-dir", default=DEFAULT_SMARTCONSOLE_DIR)
     parser.add_argument("--http-timeout", type=int, default=15)
+    parser.add_argument(
+        "--selftest-notepad",
+        action="store_true",
+        help="Run a Notepad typing self-test (diagnostics) and exit",
+    )
     parser.add_argument(
         "--with-args",
         action="store_true",
@@ -632,6 +731,14 @@ def main() -> int:
     log(f"version={LAUNCHER_VERSION}")
     print(f"[INFO] LauncherPy version: {LAUNCHER_VERSION}")
     log(f"host={os.environ.get('COMPUTERNAME','')} session={os.environ.get('SESSIONNAME','')} user={os.environ.get('USERNAME','')}")
+
+    if args.selftest_notepad:
+        log("Running Notepad input self-test")
+        try:
+            input_selftest_notepad(log)
+        except Exception as exc:
+            log(f"Selftest exception: {exc}")
+        return 0
 
     bootstrap_user_profile(log)
 
