@@ -63,10 +63,20 @@ This is the intended PoC entry point for Azure Virtual Desktop.
     - Command line: `/c C:\\S1C\\LauncherRunner.cmd`
 - The runner downloads the latest launcher from `GET /api/dl` into `%TEMP%\\s1c-launcher\\Launcher.ps1` and runs it.
 
+- PowerShell-free alternative (recommended if PowerShell itself is unusable):
+    - Install Python 3.13+ on the session host.
+    - `C:\\Windows\\System32\\cmd.exe`
+    - Command line: `/c C:\\S1C\\LauncherRunnerPy.cmd`
+    - This uses `C:\\S1C\\LauncherPy.py` to call `GET /api/fetch_connection` and launch SmartConsole.
+
 Logs on the session host:
 
 - `%TEMP%\\s1c-launcher\\LauncherRunner.log`
 - `%TEMP%\\s1c-launcher\\Launcher.log`
+
+Python launcher log:
+
+- `%TEMP%\\s1c-launcher\\LauncherPy.log`
 
 ### 4. Legacy Launcher (`Launcher.ps1`)
 
