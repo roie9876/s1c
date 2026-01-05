@@ -124,6 +124,15 @@ function Write-Log([string]$Message) {
 }
 Write-Log "Launcher started"
 
+# Diagnostics: helps compare cp1 vs cp2 (terminal host, session host VM, etc.)
+try {
+    $isWt = $false
+    if ($env:WT_SESSION -and $env:WT_SESSION.Trim().Length -gt 0) { $isWt = $true }
+    $psv = $null
+    try { $psv = $PSVersionTable.PSVersion.ToString() } catch {}
+    Write-Log "Diag host=$env:COMPUTERNAME session=$env:SESSIONNAME user=$env:USERNAME wt=$isWt ps=$psv"
+} catch {}
+
 # SendKeys is most reliable from an STA PowerShell process.
 try {
     $apt = [System.Threading.Thread]::CurrentThread.ApartmentState
@@ -264,7 +273,8 @@ public static class Win32Windows {
                 $vp = $El.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)
                 if ($vp) {
                     $vp.SetValue($Value)
-                    Write-Log "$Label set via ValuePattern"
+                    # Best-effort readback
+                    try { Write-Log "$Label set via ValuePattern (len=$($Value.Length))" } catch {}
                     return $true
                 }
             } catch {
@@ -275,7 +285,7 @@ public static class Win32Windows {
                 [System.Windows.Forms.Clipboard]::SetText($Value)
                 [System.Windows.Forms.SendKeys]::SendWait('^v')
                 Start-Sleep -Milliseconds 100
-                Write-Log "$Label set via clipboard paste"
+                try { Write-Log "$Label set via clipboard paste (len=$($Value.Length))" } catch {}
                 return $true
             } catch {
                 Write-Log "$Label paste failed: $($_.Exception.Message)"
