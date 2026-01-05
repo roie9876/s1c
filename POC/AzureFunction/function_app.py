@@ -195,7 +195,7 @@ try {
     # We'll locate a visible window by enumerating windows for the initial PID and any related SmartConsole PIDs.
     Add-Type @"
 using System;
-using System.Collections.Generic;
+using System.Text;
 using System.Runtime.InteropServices;
 
 public static class Win32Windows {
@@ -204,8 +204,22 @@ public static class Win32Windows {
   [DllImport("user32.dll")] public static extern bool EnumWindows(EnumWindowsProc lpEnumFunc, IntPtr lParam);
   [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
   [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr hWnd);
+  [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern int GetWindowText(IntPtr hWnd, StringBuilder lpString, int nMaxCount);
+  [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern int GetWindowTextLength(IntPtr hWnd);
 }
 "@
+
+    function Get-WindowTitle([IntPtr]$hWnd) {
+        try {
+            $len = [Win32Windows]::GetWindowTextLength($hWnd)
+            if ($len -le 0) { return "" }
+            $sb = New-Object System.Text.StringBuilder ($len + 1)
+            [Win32Windows]::GetWindowText($hWnd, $sb, $sb.Capacity) | Out-Null
+            return $sb.ToString()
+        } catch {
+            return ""
+        }
+    }
 
     function Get-SmartConsoleCandidatePids([int]$RootPid) {
         $pids = New-Object System.Collections.Generic.HashSet[int]
@@ -231,6 +245,23 @@ public static class Win32Windows {
                         } catch {}
                     }
                 } catch {}
+
+                # Some builds host the login UI in javaw/java or a helper process.
+                try {
+                    $helperNames = @('javaw','java','SmartConsoleLauncher','SmartConsole64','SmartConsole32')
+                    foreach ($hn in $helperNames) {
+                        try {
+                            $ps = Get-Process -Name $hn -ErrorAction SilentlyContinue
+                            foreach ($hp in $ps) {
+                                try {
+                                    if ($hp.StartTime -ge $rootStart.AddSeconds(-5) -and $hp.StartTime -le $rootStart.AddSeconds(20)) {
+                                        $pids.Add([int]$hp.Id) | Out-Null
+                                    }
+                                } catch {}
+                            }
+                        } catch {}
+                    }
+                } catch {}
             }
         } catch {}
 
@@ -239,16 +270,46 @@ public static class Win32Windows {
 
     function Get-FirstVisibleWindowHandleForPids([int[]]$Pids) {
         $best = [IntPtr]::Zero
+        $bestPid = 0
         [Win32Windows]::EnumWindows({
             param([IntPtr]$hWnd, [IntPtr]$lParam)
             $outPid = 0
             [Win32Windows]::GetWindowThreadProcessId($hWnd, [ref]$outPid) | Out-Null
             if ($outPid -and ($Pids -contains [int]$outPid) -and [Win32Windows]::IsWindowVisible($hWnd)) {
+                $title = Get-WindowTitle $hWnd
+                if (-not $title -or $title.Trim().Length -lt 1) { return $true }
                 $best = $hWnd
+                $bestPid = [int]$outPid
                 return $false
             }
             return $true
         }, [IntPtr]::Zero) | Out-Null
+        if ($best -and $best -ne [IntPtr]::Zero) {
+            try { Write-Log "Selected window from pid=$bestPid title='$(Get-WindowTitle $best)'" } catch {}
+        }
+        return $best
+    }
+
+    function Get-FirstVisibleWindowHandleByTitleFallback() {
+        $best = [IntPtr]::Zero
+        $bestPid = 0
+        [Win32Windows]::EnumWindows({
+            param([IntPtr]$hWnd, [IntPtr]$lParam)
+            if (-not [Win32Windows]::IsWindowVisible($hWnd)) { return $true }
+            $title = Get-WindowTitle $hWnd
+            if (-not $title -or $title.Trim().Length -lt 1) { return $true }
+            if ($title -match 'SmartConsole|Check Point|CheckPoint') {
+                $outPid = 0
+                [Win32Windows]::GetWindowThreadProcessId($hWnd, [ref]$outPid) | Out-Null
+                $best = $hWnd
+                $bestPid = [int]$outPid
+                return $false
+            }
+            return $true
+        }, [IntPtr]::Zero) | Out-Null
+        if ($best -and $best -ne [IntPtr]::Zero) {
+            try { Write-Log "Selected window via title fallback pid=$bestPid title='$(Get-WindowTitle $best)'" } catch {}
+        }
         return $best
     }
 
@@ -260,6 +321,11 @@ public static class Win32Windows {
         $handle = Get-FirstVisibleWindowHandleForPids -Pids $candidatePids
         if ($handle -and $handle -ne [IntPtr]::Zero) { break }
         Start-Sleep -Milliseconds 500
+    }
+
+    if (-not $handle -or $handle -eq [IntPtr]::Zero) {
+        # Fallback: find window by title even if PID attribution is unexpected.
+        $handle = Get-FirstVisibleWindowHandleByTitleFallback
     }
 
     if (-not $handle -or $handle -eq [IntPtr]::Zero) {
