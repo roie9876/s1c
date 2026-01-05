@@ -220,25 +220,133 @@ public static class Win32Show {
     [Win32Foreground]::SetForegroundWindow($handle) | Out-Null
     Start-Sleep -Milliseconds 750
 
-    # Prefill username and server; leave password blank
-    Add-Type -AssemblyName System.Windows.Forms
-    # Some SmartConsole builds have slightly different tab order; retry with a couple variants.
-    $keyVariants = @(
-        "$Username{TAB}{TAB}$TargetIp",
-        "$Username{TAB}$TargetIp"
-    )
-    foreach ($k in $keyVariants) {
-        try {
-            Write-Log "Sending keys variant: $k"
-            [System.Windows.Forms.SendKeys]::SendWait($k)
-            Start-Sleep -Milliseconds 300
-            break
-        } catch {
-            Write-Log "SendKeys failed: $($_.Exception.Message)"
+    # Prefill username and server; leave password blank.
+    # Prefer UI Automation (more reliable in AVD RemoteApp) and fall back to SendKeys.
+    $didInject = $false
+    try {
+        Add-Type -AssemblyName UIAutomationClient
+        Add-Type -AssemblyName UIAutomationTypes
+
+        Add-Type @"
+using System;
+using System.Collections.Generic;
+using System.Runtime.InteropServices;
+
+public static class Win32Windows {
+  public delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
+
+  [DllImport("user32.dll")] public static extern bool EnumWindows(EnumWindowsProc lpEnumFunc, IntPtr lParam);
+  [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
+  [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr hWnd);
+}
+"@
+
+        function Get-VisibleWindowHandlesForPid([int]$Pid) {
+            $handles = New-Object System.Collections.Generic.List[System.IntPtr]
+            [Win32Windows]::EnumWindows({
+                param([IntPtr]$hWnd, [IntPtr]$lParam)
+                $outPid = 0
+                [Win32Windows]::GetWindowThreadProcessId($hWnd, [ref]$outPid) | Out-Null
+                if ($outPid -eq [uint32]$Pid -and [Win32Windows]::IsWindowVisible($hWnd)) {
+                    $handles.Add($hWnd)
+                }
+                return $true
+            }, [IntPtr]::Zero) | Out-Null
+            return $handles
+        }
+
+        function Try-InjectWithUIA([int]$Pid, [string]$User, [string]$Server) {
+            $condEdit = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ControlTypeProperty, [System.Windows.Automation.ControlType]::Edit)
+            $condCombo = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ControlTypeProperty, [System.Windows.Automation.ControlType]::ComboBox)
+
+            $handles = Get-VisibleWindowHandlesForPid -Pid $Pid
+            foreach ($h in $handles) {
+                $win = [System.Windows.Automation.AutomationElement]::FromHandle($h)
+                if (-not $win) { continue }
+
+                # Heuristic: login window should contain at least one non-password Edit.
+                $edits = $win.FindAll([System.Windows.Automation.TreeScope]::Descendants, $condEdit)
+                if (-not $edits -or $edits.Count -lt 1) { continue }
+
+                # Find a non-password Edit for username.
+                $userEdit = $null
+                foreach ($e in $edits) {
+                    $isPwd = $false
+                    try { $isPwd = [bool]$e.GetCurrentPropertyValue([System.Windows.Automation.AutomationElement]::IsPasswordProperty) } catch {}
+                    if ($isPwd) { continue }
+                    $userEdit = $e
+                    break
+                }
+                if (-not $userEdit) { continue }
+
+                # Server field is commonly a ComboBox; try that first.
+                $combo = $win.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $condCombo)
+                if ($combo) {
+                    try {
+                        $vp = $combo.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)
+                        if ($vp) { $vp.SetValue($Server) }
+                    } catch {
+                        # Some combos don't support ValuePattern; try inner Edit.
+                        try {
+                            $innerEdit = $combo.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $condEdit)
+                            if ($innerEdit) {
+                                $vp2 = $innerEdit.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)
+                                if ($vp2) { $vp2.SetValue($Server) }
+                            }
+                        } catch {}
+                    }
+                }
+
+                # Set username
+                try {
+                    $uvp = $userEdit.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)
+                    if ($uvp) { $uvp.SetValue($User) }
+                } catch {}
+
+                return $true
+            }
+            return $false
+        }
+
+        # Wait up to 30s for login UI to be ready (splash screens can appear first).
+        for ($t = 0; $t -lt 60; $t++) {
+            if (Try-InjectWithUIA -Pid $Process.Id -User $Username -Server $TargetIp) {
+                $didInject = $true
+                Write-Log "Injected fields via UIAutomation"
+                break
+            }
+            Start-Sleep -Milliseconds 500
+        }
+    } catch {
+        Write-Log "UIAutomation injection failed: $($_.Exception.Message)"
+    }
+
+    if (-not $didInject) {
+        Add-Type -AssemblyName System.Windows.Forms
+        # Some SmartConsole builds have slightly different tab order; retry with a couple variants.
+        $keyVariants = @(
+            "$Username{TAB}{TAB}$TargetIp",
+            "$Username{TAB}$TargetIp"
+        )
+        foreach ($k in $keyVariants) {
+            try {
+                Write-Log "Falling back to SendKeys variant: $k"
+                [System.Windows.Forms.SendKeys]::SendWait($k)
+                Start-Sleep -Milliseconds 300
+                $didInject = $true
+                Write-Log "Injected fields via SendKeys"
+                break
+            } catch {
+                Write-Log "SendKeys failed: $($_.Exception.Message)"
+            }
         }
     }
-    Write-Host "[INFO] Prefilled username/server; please type password and click Login." -ForegroundColor Cyan
-    Write-Log "Prefilled fields via SendKeys"
+
+    if ($didInject) {
+        Write-Host "[INFO] Prefilled username/server; please type password and click Login." -ForegroundColor Cyan
+    } else {
+        Write-Host "[WARN] Could not auto-fill fields. Please enter username/server manually." -ForegroundColor Yellow
+    }
 
     # IMPORTANT for AVD RemoteApp: keep the published process alive so the session doesn't end.
     Write-Host "[INFO] Waiting for SmartConsole to exit..." -ForegroundColor Cyan
