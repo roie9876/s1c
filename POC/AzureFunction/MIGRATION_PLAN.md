@@ -159,6 +159,23 @@ Since we cannot push context via the URL in AVD, and users may have multiple con
 
 ### 3.1 Detailed Workflow (The "Queue" Flow)
 
+#### Normal user login flow (Mermaid)
+
+```mermaid
+flowchart TD
+    A["User clicks Connect in Infinity Portal (AWS)"] --> B["Portal creates connection request in Azure Backend (Function -> Cosmos DB, TTL)"]
+    B --> C["User launches AVD Web Client / AVD Client"]
+    C --> D["User starts SmartConsole RemoteApp (Launcher)"]
+    D --> E["Launcher resolves userId (Entra ID UPN)"]
+    E --> F["Launcher calls Broker: GET /api/fetch-connection?userId=..."]
+    F --> G{"Pending request found?"}
+    G -->|No| H["Show: No pending connection request"] --> I["Stop"]
+    G -->|Yes| J["Broker returns targetIp + username (and encrypted secret) and marks request CONSUMED/claimed"]
+    J --> K["Launcher displays connection details (PoC: user types password)"]
+    K --> L["Launcher starts SmartConsole.exe"]
+    L --> M["User completes login in SmartConsole"] --> N["Done"]
+```
+
 1.  **User Action (Portal):**
     *   User logs into Infinity Portal (AWS).
     *   User selects "Customer A - Firewall 1" and clicks "Connect".
