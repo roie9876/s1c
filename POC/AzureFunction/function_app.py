@@ -255,56 +255,110 @@ public static class Win32Windows {
             return $handles
         }
 
+        Add-Type -AssemblyName System.Windows.Forms
+
+        function Set-ElementValue([System.Windows.Automation.AutomationElement]$El, [string]$Value, [string]$Label) {
+            if (-not $El) { return $false }
+            # Prefer ValuePattern; fall back to clipboard paste into focused control.
+            try {
+                $vp = $El.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)
+                if ($vp) {
+                    $vp.SetValue($Value)
+                    Write-Log "$Label set via ValuePattern"
+                    return $true
+                }
+            } catch {
+                Write-Log "$Label ValuePattern failed: $($_.Exception.Message)"
+            }
+            try {
+                $El.SetFocus()
+                [System.Windows.Forms.Clipboard]::SetText($Value)
+                [System.Windows.Forms.SendKeys]::SendWait('^v')
+                Start-Sleep -Milliseconds 100
+                Write-Log "$Label set via clipboard paste"
+                return $true
+            } catch {
+                Write-Log "$Label paste failed: $($_.Exception.Message)"
+            }
+            return $false
+        }
+
         function Try-InjectWithUIA([int]$Pid, [string]$User, [string]$Server) {
             $condEdit = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ControlTypeProperty, [System.Windows.Automation.ControlType]::Edit)
             $condCombo = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ControlTypeProperty, [System.Windows.Automation.ControlType]::ComboBox)
 
             $handles = Get-VisibleWindowHandlesForPid -Pid $Pid
+            if (-not $handles -or $handles.Count -lt 1) { return $false }
+
             foreach ($h in $handles) {
                 $win = [System.Windows.Automation.AutomationElement]::FromHandle($h)
                 if (-not $win) { continue }
 
-                # Heuristic: login window should contain at least one non-password Edit.
+                $winName = ''
+                try { $winName = $win.Current.Name } catch {}
+
+                # Collect edits (we will infer Username/Server by on-screen position).
                 $edits = $win.FindAll([System.Windows.Automation.TreeScope]::Descendants, $condEdit)
                 if (-not $edits -or $edits.Count -lt 1) { continue }
 
-                # Find a non-password Edit for username.
-                $userEdit = $null
+                $nonPwd = @()
                 foreach ($e in $edits) {
                     $isPwd = $false
                     try { $isPwd = [bool]$e.GetCurrentPropertyValue([System.Windows.Automation.AutomationElement]::IsPasswordProperty) } catch {}
                     if ($isPwd) { continue }
-                    $userEdit = $e
-                    break
-                }
-                if (-not $userEdit) { continue }
 
-                # Server field is commonly a ComboBox; try that first.
-                $combo = $win.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $condCombo)
-                if ($combo) {
+                    # Skip invisible/disabled
                     try {
-                        $vp = $combo.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)
-                        if ($vp) { $vp.SetValue($Server) }
-                    } catch {
-                        # Some combos don't support ValuePattern; try inner Edit.
+                        if (-not $e.Current.IsEnabled) { continue }
+                        if ($e.Current.IsOffscreen) { continue }
+                    } catch {}
+
+                    $top = 0; $left = 0
+                    try {
+                        $rect = $e.Current.BoundingRectangle
+                        $top = [double]$rect.Top
+                        $left = [double]$rect.Left
+                    } catch {}
+                    $nonPwd += [PSCustomObject]@{ El = $e; Top = $top; Left = $left }
+                }
+
+                if (-not $nonPwd -or $nonPwd.Count -lt 1) { continue }
+                $sorted = $nonPwd | Sort-Object Top, Left
+
+                $userEdit = $sorted[0].El
+                $serverEdit = $null
+                if ($sorted.Count -ge 2) {
+                    $serverEdit = $sorted[$sorted.Count - 1].El
+                }
+
+                Write-Log "UIA window='$winName' edits=$($edits.Count) nonPwd=$($sorted.Count)"
+
+                $didUser = Set-ElementValue -El $userEdit -Value $User -Label 'Username'
+                $didServer = $false
+
+                # Server field is often a ComboBox; try it, but also fall back to the bottom-most non-password Edit.
+                $combo = $null
+                try { $combo = $win.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $condCombo) } catch {}
+                if ($combo) {
+                    # Some combos don't support ValuePattern; try inner Edit too.
+                    $didServer = (Set-ElementValue -El $combo -Value $Server -Label 'Server(Combo)')
+                    if (-not $didServer) {
                         try {
                             $innerEdit = $combo.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $condEdit)
-                            if ($innerEdit) {
-                                $vp2 = $innerEdit.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)
-                                if ($vp2) { $vp2.SetValue($Server) }
-                            }
+                            if ($innerEdit) { $didServer = (Set-ElementValue -El $innerEdit -Value $Server -Label 'Server(ComboEdit)') }
                         } catch {}
                     }
                 }
+                if (-not $didServer -and $serverEdit) {
+                    $didServer = (Set-ElementValue -El $serverEdit -Value $Server -Label 'Server(Edit)')
+                }
 
-                # Set username
-                try {
-                    $uvp = $userEdit.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)
-                    if ($uvp) { $uvp.SetValue($User) }
-                } catch {}
-
-                return $true
+                # Only declare success if we actually set both fields.
+                if ($didUser -and $didServer) {
+                    return $true
+                }
             }
+
             return $false
         }
 
