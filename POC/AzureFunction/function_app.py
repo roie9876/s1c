@@ -115,18 +115,30 @@ $ApiBaseUrl = "https://s1c-function-11729.azurewebsites.net/api"
 $SmartConsolePath = "C:\\Program Files (x86)\\CheckPoint\\SmartConsole\\R82\\PROGRAM\\SmartConsole.exe"
 $SmartConsoleDir = "C:\\Program Files (x86)\\CheckPoint\\SmartConsole\\R82\\PROGRAM"
 
+$TempDir = Join-Path $env:TEMP "s1c-launcher"
+if (-not (Test-Path $TempDir)) { New-Item -Path $TempDir -ItemType Directory -Force | Out-Null }
+$LogPath = Join-Path $TempDir "Launcher.log"
+function Write-Log([string]$Message) {
+    $ts = (Get-Date).ToString("s")
+    Add-Content -Path $LogPath -Value "[$ts] $Message" -ErrorAction SilentlyContinue
+}
+Write-Log "Launcher started"
+
 # Identify user
 if ($OverrideUser -and $OverrideUser.Trim().Length -gt 0) {
     $CurrentUserId = $OverrideUser
     Write-Host "[INFO] Using overridden user ID: $CurrentUserId" -ForegroundColor Yellow
+    Write-Log "Using overridden userId: $CurrentUserId"
 } else {
     $CurrentUserId = whoami /upn
     if (-not $CurrentUserId) { $CurrentUserId = $env:USERNAME }
     Write-Host "[INFO] Detected User ID: $CurrentUserId" -ForegroundColor Cyan
+    Write-Log "Detected userId: $CurrentUserId"
 }
 
 $FetchUrl = "$ApiBaseUrl/fetch_connection?userId=$CurrentUserId"
 Write-Host "[INFO] Polling API: $FetchUrl"
+Write-Log "Polling API: $FetchUrl"
 
 try {
     $Response = Invoke-RestMethod -Uri $FetchUrl -Method Get -ErrorAction Stop
@@ -137,16 +149,19 @@ try {
     Write-Host "[SUCCESS] Connection Request Found!" -ForegroundColor Green
     Write-Host "    Target: $TargetIp"
     Write-Host "    User:   $Username"
+    Write-Log "Connection found. targetIp=$TargetIp username=$Username"
 
     if (-not (Test-Path $SmartConsolePath)) {
         Write-Host "[ERROR] SmartConsole not found at: $SmartConsolePath" -ForegroundColor Red
-        Read-Host "Press Enter to exit..."
+        Write-Log "SmartConsole not found at: $SmartConsolePath"
+        Start-Sleep -Seconds 10
         exit 1
     }
 
     Write-Host "[ACTION] Launching SmartConsole (user will type password)..." -ForegroundColor Green
     $Process = Start-Process -FilePath $SmartConsolePath -WorkingDirectory $SmartConsoleDir -PassThru
     if (-not $Process) { throw "Failed to start SmartConsole" }
+    Write-Log "Started SmartConsole. pid=$($Process.Id)"
 
     # Wait for main window handle (up to 30s)
     $handle = 0
@@ -158,7 +173,9 @@ try {
 
     if ($handle -eq 0) {
         Write-Host "[WARN] Could not find SmartConsole window handle; skipping auto-fill." -ForegroundColor Yellow
-        Read-Host "Press Enter to exit..."
+        Write-Log "Could not find SmartConsole window handle; skipping auto-fill"
+        Write-Host "[INFO] Waiting for SmartConsole to exit..." -ForegroundColor Cyan
+        Wait-Process -Id $Process.Id -ErrorAction SilentlyContinue
         exit 0
     }
 
@@ -178,12 +195,16 @@ public static class Win32Foreground {
     $keys = "$Username{TAB}{TAB}$TargetIp"
     [System.Windows.Forms.SendKeys]::SendWait($keys)
     Write-Host "[INFO] Prefilled username/server; please type password and click Login." -ForegroundColor Cyan
+    Write-Log "Prefilled fields via SendKeys"
 
-    Read-Host "Press Enter after you attempt login to close this window"
+    # IMPORTANT for AVD RemoteApp: keep the published process alive so the session doesn't end.
+    Write-Host "[INFO] Waiting for SmartConsole to exit..." -ForegroundColor Cyan
+    Wait-Process -Id $Process.Id -ErrorAction SilentlyContinue
 }
 catch {
     Write-Host "[ERROR] $($_.Exception.Message)" -ForegroundColor Red
-    Read-Host "Press Enter to exit..."
+    Write-Log "ERROR: $($_.Exception.Message)"
+    Start-Sleep -Seconds 10
 }
 '''
     return func.HttpResponse(

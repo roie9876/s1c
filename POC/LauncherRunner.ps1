@@ -19,7 +19,20 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+$tempDir = Join-Path $env:TEMP "s1c-launcher"
+if (-not (Test-Path $tempDir)) { New-Item -Path $tempDir -ItemType Directory -Force | Out-Null }
+$logPath = Join-Path $tempDir "LauncherRunner.log"
+function Write-Log([string]$Message) {
+    $ts = (Get-Date).ToString('s')
+    Add-Content -Path $logPath -Value "[$ts] $Message" -ErrorAction SilentlyContinue
+}
+Write-Log "LauncherRunner started"
+Write-Log "PSVersion=$($PSVersionTable.PSVersion)"
+try { Write-Log "whoami_upn=$(whoami /upn)" } catch {}
+
 try {
+    try { Start-Transcript -Path $logPath -Append | Out-Null } catch {}
+
     # Ensure TLS 1.2 for older Windows builds
     try {
         [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
@@ -29,23 +42,22 @@ try {
 
     $cacheBust = [Guid]::NewGuid().ToString('N')
     $launcherUrl = "$FunctionBaseUrl/api/dl?nocache=$cacheBust"
-    $tempDir = Join-Path $env:TEMP "s1c-launcher"
     $launcherPath = Join-Path $tempDir "Launcher.ps1"
 
-    if (-not (Test-Path $tempDir)) {
-        New-Item -Path $tempDir -ItemType Directory -Force | Out-Null
-    }
-
     Write-Host "[INFO] Downloading launcher from: $launcherUrl" -ForegroundColor Cyan
+    Write-Log "Downloading launcher from: $launcherUrl"
     Invoke-WebRequest -Uri $launcherUrl -UseBasicParsing -OutFile $launcherPath -Headers @{
         'Cache-Control' = 'no-cache'
         'Pragma'        = 'no-cache'
     }
 
+    Write-Log "Downloaded to: $launcherPath"
+
     # Unblock (harmless if not needed)
     try { Unblock-File -Path $launcherPath -ErrorAction SilentlyContinue } catch {}
 
     Write-Host "[INFO] Running launcher..." -ForegroundColor Cyan
+    Write-Log "Starting launcher"
 
     $psArgs = @(
         "-NoProfile",
@@ -58,10 +70,14 @@ try {
     }
 
     $p = Start-Process -FilePath "powershell.exe" -ArgumentList $psArgs -Wait -PassThru
+    Write-Log "Launcher exitCode=$($p.ExitCode)"
     exit $p.ExitCode
 }
 catch {
     Write-Host "[ERROR] LauncherRunner failed: $($_.Exception.Message)" -ForegroundColor Red
-    Read-Host "Press Enter to close"
+    Write-Log "ERROR: $($_.Exception.Message)"
     exit 1
+}
+finally {
+    try { Stop-Transcript | Out-Null } catch {}
 }
