@@ -23,7 +23,7 @@ DEFAULT_API_BASE_URL = "https://s1c-function-11729.azurewebsites.net/api"
 DEFAULT_SMARTCONSOLE_PATH = r"C:\Program Files (x86)\CheckPoint\SmartConsole\R82\PROGRAM\SmartConsole.exe"
 DEFAULT_SMARTCONSOLE_DIR = r"C:\Program Files (x86)\CheckPoint\SmartConsole\R82\PROGRAM"
 
-LAUNCHER_VERSION = "2026-01-05-autofill6"
+LAUNCHER_VERSION = "2026-01-05-autofill7"
 
 
 def _now_iso() -> str:
@@ -180,6 +180,34 @@ def try_find_window_handle_by_title(substr: str) -> int:
 
     EnumWindows(enum_proc, 0)
     return int(found["hwnd"]) if found["hwnd"] else 0
+
+
+def get_window_title(hwnd: int) -> str:
+    if not hwnd:
+        return ""
+    user32 = ctypes.windll.user32
+    GetWindowTextLengthW = user32.GetWindowTextLengthW
+    GetWindowTextLengthW.argtypes = [wintypes.HWND]
+    GetWindowTextLengthW.restype = ctypes.c_int
+    GetWindowTextW = user32.GetWindowTextW
+    GetWindowTextW.argtypes = [wintypes.HWND, wintypes.LPWSTR, ctypes.c_int]
+    GetWindowTextW.restype = ctypes.c_int
+
+    length = int(GetWindowTextLengthW(wintypes.HWND(hwnd)))
+    if length <= 0:
+        return ""
+    buf = ctypes.create_unicode_buffer(length + 1)
+    GetWindowTextW(wintypes.HWND(hwnd), buf, len(buf))
+    return (buf.value or "").strip()
+
+
+def get_foreground_hwnd() -> int:
+    try:
+        user32 = ctypes.windll.user32
+        hwnd = user32.GetForegroundWindow()
+        return int(hwnd) if hwnd else 0
+    except Exception:
+        return 0
 
 
 def bring_window_to_foreground(hwnd: int) -> None:
@@ -506,12 +534,18 @@ def try_autofill_smartconsole(username: str | None, target_ip: str | None, log) 
     t_after_click = 0.8 if remoteapp_mode else 0.15
     t_between_keys = 0.25 if remoteapp_mode else 0.10
 
+    log(f"Autofill mode: remoteapp_mode={remoteapp_mode} explorer_running={not remoteapp_mode}")
+
     # Heuristic: locate the SmartConsole login window by title.
     for _ in range(60):
         hwnd = try_find_window_handle_by_title("SmartConsole")
         if hwnd:
+            log(f"Autofill found hwnd={hwnd} title='{get_window_title(hwnd)}'")
             bring_window_to_foreground(hwnd)
             time.sleep(t_focus)
+
+            fg = get_foreground_hwnd()
+            log(f"After bring_to_foreground: fg_hwnd={fg} fg_title='{get_window_title(fg)}'")
 
             # Click the Username field area (relative coords tuned for the R82 login UI).
             # This improves reliability in RemoteApp where focus can land elsewhere.
@@ -520,6 +554,9 @@ def try_autofill_smartconsole(username: str | None, target_ip: str | None, log) 
                 time.sleep(t_after_click)
             except Exception as exc:
                 log(f"Click focus failed: {exc}")
+
+            fg2 = get_foreground_hwnd()
+            log(f"After click: fg_hwnd={fg2} fg_title='{get_window_title(fg2)}'")
 
             # Type username, then tab to password, tab to server field, then type server.
             # This matches typical SmartConsole login tab order.
