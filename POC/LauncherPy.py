@@ -23,7 +23,7 @@ DEFAULT_API_BASE_URL = "https://s1c-function-11729.azurewebsites.net/api"
 DEFAULT_SMARTCONSOLE_PATH = r"C:\Program Files (x86)\CheckPoint\SmartConsole\R82\PROGRAM\SmartConsole.exe"
 DEFAULT_SMARTCONSOLE_DIR = r"C:\Program Files (x86)\CheckPoint\SmartConsole\R82\PROGRAM"
 
-LAUNCHER_VERSION = "2026-01-05-autofill5"
+LAUNCHER_VERSION = "2026-01-05-autofill6"
 
 
 def _now_iso() -> str:
@@ -330,6 +330,114 @@ def send_vk(vk: int) -> None:
         raise RuntimeError(f"SendInput(key) sent={sent}/2 last_error={err}")
 
 
+def send_vk_down(vk: int) -> None:
+    user32 = ctypes.WinDLL("user32", use_last_error=True)
+
+    INPUT_KEYBOARD = 1
+
+    class MOUSEINPUT(ctypes.Structure):
+        _fields_ = [
+            ("dx", wintypes.LONG),
+            ("dy", wintypes.LONG),
+            ("mouseData", wintypes.DWORD),
+            ("dwFlags", wintypes.DWORD),
+            ("time", wintypes.DWORD),
+            ("dwExtraInfo", wintypes.ULONG_PTR),
+        ]
+
+    class KEYBDINPUT(ctypes.Structure):
+        _fields_ = [
+            ("wVk", wintypes.WORD),
+            ("wScan", wintypes.WORD),
+            ("dwFlags", wintypes.DWORD),
+            ("time", wintypes.DWORD),
+            ("dwExtraInfo", wintypes.ULONG_PTR),
+        ]
+
+    class HARDWAREINPUT(ctypes.Structure):
+        _fields_ = [("uMsg", wintypes.DWORD), ("wParamL", wintypes.WORD), ("wParamH", wintypes.WORD)]
+
+    class _INPUT_UNION(ctypes.Union):
+        _fields_ = [("mi", MOUSEINPUT), ("ki", KEYBDINPUT), ("hi", HARDWAREINPUT)]
+
+    class INPUT(ctypes.Structure):
+        _anonymous_ = ("u",)
+        _fields_ = [("type", wintypes.DWORD), ("u", _INPUT_UNION)]
+
+    SendInput = user32.SendInput
+    SendInput.argtypes = (wintypes.UINT, ctypes.POINTER(INPUT), ctypes.c_int)
+    SendInput.restype = wintypes.UINT
+
+    inp = INPUT(type=INPUT_KEYBOARD, ki=KEYBDINPUT(wVk=vk, wScan=0, dwFlags=0, time=0, dwExtraInfo=0))
+    arr_type = INPUT * 1
+    arr = arr_type(inp)
+    ctypes.set_last_error(0)
+    sent = SendInput(1, arr, ctypes.sizeof(INPUT))
+    if sent != 1:
+        err = ctypes.get_last_error()
+        raise RuntimeError(f"SendInput(keydown) sent={sent}/1 last_error={err}")
+
+
+def send_vk_up(vk: int) -> None:
+    user32 = ctypes.WinDLL("user32", use_last_error=True)
+
+    INPUT_KEYBOARD = 1
+    KEYEVENTF_KEYUP = 0x0002
+
+    class MOUSEINPUT(ctypes.Structure):
+        _fields_ = [
+            ("dx", wintypes.LONG),
+            ("dy", wintypes.LONG),
+            ("mouseData", wintypes.DWORD),
+            ("dwFlags", wintypes.DWORD),
+            ("time", wintypes.DWORD),
+            ("dwExtraInfo", wintypes.ULONG_PTR),
+        ]
+
+    class KEYBDINPUT(ctypes.Structure):
+        _fields_ = [
+            ("wVk", wintypes.WORD),
+            ("wScan", wintypes.WORD),
+            ("dwFlags", wintypes.DWORD),
+            ("time", wintypes.DWORD),
+            ("dwExtraInfo", wintypes.ULONG_PTR),
+        ]
+
+    class HARDWAREINPUT(ctypes.Structure):
+        _fields_ = [("uMsg", wintypes.DWORD), ("wParamL", wintypes.WORD), ("wParamH", wintypes.WORD)]
+
+    class _INPUT_UNION(ctypes.Union):
+        _fields_ = [("mi", MOUSEINPUT), ("ki", KEYBDINPUT), ("hi", HARDWAREINPUT)]
+
+    class INPUT(ctypes.Structure):
+        _anonymous_ = ("u",)
+        _fields_ = [("type", wintypes.DWORD), ("u", _INPUT_UNION)]
+
+    SendInput = user32.SendInput
+    SendInput.argtypes = (wintypes.UINT, ctypes.POINTER(INPUT), ctypes.c_int)
+    SendInput.restype = wintypes.UINT
+
+    inp = INPUT(type=INPUT_KEYBOARD, ki=KEYBDINPUT(wVk=vk, wScan=0, dwFlags=KEYEVENTF_KEYUP, time=0, dwExtraInfo=0))
+    arr_type = INPUT * 1
+    arr = arr_type(inp)
+    ctypes.set_last_error(0)
+    sent = SendInput(1, arr, ctypes.sizeof(INPUT))
+    if sent != 1:
+        err = ctypes.get_last_error()
+        raise RuntimeError(f"SendInput(keyup) sent={sent}/1 last_error={err}")
+
+
+def send_ctrl_a_and_delete() -> None:
+    # Ctrl+A then Delete to clear the focused field.
+    VK_CONTROL = 0x11
+    VK_A = 0x41
+    VK_DELETE = 0x2E
+    send_vk_down(VK_CONTROL)
+    send_vk(VK_A)
+    send_vk_up(VK_CONTROL)
+    send_vk(VK_DELETE)
+
+
 def send_text_unicode(text: str) -> None:
     user32 = ctypes.WinDLL("user32", use_last_error=True)
 
@@ -392,31 +500,52 @@ def try_autofill_smartconsole(username: str | None, target_ip: str | None, log) 
     if not username and not target_ip:
         return False
 
+    # RemoteApp sessions often run without explorer.exe; timing/focus is less reliable.
+    remoteapp_mode = not is_image_running("explorer.exe")
+    t_focus = 1.5 if remoteapp_mode else 0.75
+    t_after_click = 0.8 if remoteapp_mode else 0.15
+    t_between_keys = 0.25 if remoteapp_mode else 0.10
+
     # Heuristic: locate the SmartConsole login window by title.
     for _ in range(60):
         hwnd = try_find_window_handle_by_title("SmartConsole")
         if hwnd:
             bring_window_to_foreground(hwnd)
-            time.sleep(0.75)
+            time.sleep(t_focus)
 
             # Click the Username field area (relative coords tuned for the R82 login UI).
             # This improves reliability in RemoteApp where focus can land elsewhere.
             try:
                 click_relative(hwnd, x_ratio=0.70, y_ratio=0.23)
-                time.sleep(0.15)
+                time.sleep(t_after_click)
             except Exception as exc:
                 log(f"Click focus failed: {exc}")
 
             # Type username, then tab to password, tab to server field, then type server.
             # This matches typical SmartConsole login tab order.
             try:
+                # Clear username field
+                try:
+                    send_ctrl_a_and_delete()
+                    time.sleep(t_between_keys)
+                except Exception as exc:
+                    log(f"Clear username failed: {exc}")
+
                 if username:
                     send_text_unicode(str(username))
-                time.sleep(0.1)
+                time.sleep(t_between_keys)
                 send_vk(0x09)  # VK_TAB
-                time.sleep(0.1)
+                time.sleep(t_between_keys)
                 send_vk(0x09)  # VK_TAB
-                time.sleep(0.1)
+                time.sleep(t_between_keys)
+
+                # Clear server field
+                try:
+                    send_ctrl_a_and_delete()
+                    time.sleep(t_between_keys)
+                except Exception as exc:
+                    log(f"Clear server failed: {exc}")
+
                 if target_ip:
                     send_text_unicode(str(target_ip))
                 log("Autofill attempted via SendInput (click+type)")
