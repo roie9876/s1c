@@ -48,6 +48,7 @@
                         <th>Customer Name</th>
                         <th>IP Address</th>
                         <th>User</th>
+                        <th>Mapped AVD User</th>
                         <th>Action</th>
                     </tr>
                 </thead>
@@ -57,6 +58,7 @@
                         <td>{{ cust.name }}</td>
                         <td>{{ cust.ip }}</td>
                         <td>{{ cust.user }}</td>
+                        <td>{{ cust.avdUserId or '-' }}</td>
                         <td>
                             <form action="/connect/{{ cust.id }}" method="POST">
                                 <button type="submit" class="btn">Connect</button>

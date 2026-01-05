@@ -25,8 +25,22 @@ CUSTOMERS = [
     {"id": "cust_1", "name": "Acme Corp (Firewall A)", "ip": "10.0.1.5", "user": "admin"},
     {"id": "cust_2", "name": "Globex Inc (Firewall B)", "ip": "192.168.10.20", "user": "admin"},
     {"id": "cust_3", "name": "Soylent Corp (Firewall C)", "ip": "172.16.0.5", "user": "readonly"},
-    {"id": "cust_4", "name": "Real Test (Azure VM) - cp1", "ip": "20.240.218.22", "user": "cp1", "password": os.getenv("CP1_PASSWORD")},
-    {"id": "cust_5", "name": "Real Test (Azure VM) - Admin", "ip": "20.240.218.22", "user": "admin", "password": os.getenv("ADMIN_PASSWORD")}
+    {
+        "id": "cust_4",
+        "name": "Real Test (Azure VM) - cp1",
+        "ip": "20.240.218.22",
+        "user": "cp1",
+        "avdUserId": "cp1@roie9876gmail.onmicrosoft.com",
+        "password": os.getenv("CP1_PASSWORD")
+    },
+    {
+        "id": "cust_5",
+        "name": "Real Test (Azure VM) - Admin",
+        "ip": "20.240.218.22",
+        "user": "admin",
+        "avdUserId": "cp2@roie9876gmail.onmicrosoft.com",
+        "password": os.getenv("ADMIN_PASSWORD")
+    }
 ]
 
 @app.route('/')
@@ -45,8 +59,9 @@ def connect(customer_id):
     if not customer:
         return "Customer not found", 404
 
-    # 2. Identify User (Hardcoded for PoC)
-    user_id = "roie@mssp.com" 
+    # 2. Identify AVD User (PoC mapping)
+    # In production, the portal would queue requests under the user's Entra UPN.
+    user_id = customer.get('avdUserId') or "roie@mssp.com"
 
     # 3. Prepare Payload for Azure Function
     payload = {

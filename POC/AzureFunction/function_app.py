@@ -108,7 +108,7 @@ def download_launcher(req: func.HttpRequest) -> func.HttpResponse:
 #>
 
 param (
-    [string]$OverrideUser = "roie@mssp.com"
+    [string]$OverrideUser = ""
 )
 
 $ApiBaseUrl = "https://s1c-function-11729.azurewebsites.net/api"
@@ -116,7 +116,7 @@ $SmartConsolePath = "C:\\Program Files (x86)\\CheckPoint\\SmartConsole\\R82\\PRO
 $SmartConsoleDir = "C:\\Program Files (x86)\\CheckPoint\\SmartConsole\\R82\\PROGRAM"
 
 # Identify user
-if ($OverrideUser) {
+if ($OverrideUser -and $OverrideUser.Trim().Length -gt 0) {
     $CurrentUserId = $OverrideUser
     Write-Host "[INFO] Using overridden user ID: $CurrentUserId" -ForegroundColor Yellow
 } else {
