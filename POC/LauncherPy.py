@@ -23,7 +23,7 @@ DEFAULT_API_BASE_URL = "https://s1c-function-11729.azurewebsites.net/api"
 DEFAULT_SMARTCONSOLE_PATH = r"C:\Program Files (x86)\CheckPoint\SmartConsole\R82\PROGRAM\SmartConsole.exe"
 DEFAULT_SMARTCONSOLE_DIR = r"C:\Program Files (x86)\CheckPoint\SmartConsole\R82\PROGRAM"
 
-LAUNCHER_VERSION = "2026-01-05-autofill3"
+LAUNCHER_VERSION = "2026-01-05-autofill4"
 
 
 def _now_iso() -> str:
@@ -274,7 +274,11 @@ def send_vk(vk: int) -> None:
 
     down = INPUT(type=INPUT_KEYBOARD, ki=KEYBDINPUT(wVk=vk, wScan=0, dwFlags=0, time=0, dwExtraInfo=0))
     up = INPUT(type=INPUT_KEYBOARD, ki=KEYBDINPUT(wVk=vk, wScan=0, dwFlags=KEYEVENTF_KEYUP, time=0, dwExtraInfo=0))
-    user32.SendInput(2, ctypes.byref((down, up)), ctypes.sizeof(INPUT))
+    
+    seq = (down, up)
+    arr_type = INPUT * 2
+    arr = arr_type(*seq)
+    user32.SendInput(2, ctypes.byref(arr), ctypes.sizeof(INPUT))
 
 
 def send_text_unicode(text: str) -> None:
