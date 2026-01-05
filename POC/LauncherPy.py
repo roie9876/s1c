@@ -8,6 +8,8 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import ctypes
+from ctypes import wintypes
 
 
 DEFAULT_API_BASE_URL = "https://s1c-function-11729.azurewebsites.net/api"
@@ -125,6 +127,157 @@ def is_image_running(image_name: str) -> bool:
         return False
 
 
+def try_find_window_handle_by_title(substr: str) -> int:
+    """Finds the first visible top-level window whose title contains substr (case-insensitive)."""
+    user32 = ctypes.windll.user32
+
+    EnumWindows = user32.EnumWindows
+    EnumWindows.argtypes = [wintypes.WNDPROC, wintypes.LPARAM]
+    EnumWindows.restype = wintypes.BOOL
+
+    IsWindowVisible = user32.IsWindowVisible
+    IsWindowVisible.argtypes = [wintypes.HWND]
+    IsWindowVisible.restype = wintypes.BOOL
+
+    GetWindowTextLengthW = user32.GetWindowTextLengthW
+    GetWindowTextLengthW.argtypes = [wintypes.HWND]
+    GetWindowTextLengthW.restype = ctypes.c_int
+
+    GetWindowTextW = user32.GetWindowTextW
+    GetWindowTextW.argtypes = [wintypes.HWND, wintypes.LPWSTR, ctypes.c_int]
+    GetWindowTextW.restype = ctypes.c_int
+
+    target = (substr or "").lower()
+    found = {"hwnd": 0}
+
+    @wintypes.WNDPROC
+    def enum_proc(hwnd, lparam):
+        try:
+            if not IsWindowVisible(hwnd):
+                return True
+            length = GetWindowTextLengthW(hwnd)
+            if length <= 0:
+                return True
+            buf = ctypes.create_unicode_buffer(length + 1)
+            GetWindowTextW(hwnd, buf, len(buf))
+            title = (buf.value or "").strip()
+            if title and target in title.lower():
+                found["hwnd"] = int(hwnd)
+                return False
+        except Exception:
+            return True
+        return True
+
+    EnumWindows(enum_proc, 0)
+    return int(found["hwnd"]) if found["hwnd"] else 0
+
+
+def bring_window_to_foreground(hwnd: int) -> None:
+    if not hwnd:
+        return
+    user32 = ctypes.windll.user32
+    try:
+        # SW_RESTORE=9
+        user32.ShowWindowAsync(wintypes.HWND(hwnd), 9)
+    except Exception:
+        pass
+    try:
+        user32.SetForegroundWindow(wintypes.HWND(hwnd))
+    except Exception:
+        pass
+
+
+def send_vk(vk: int) -> None:
+    user32 = ctypes.windll.user32
+
+    INPUT_KEYBOARD = 1
+    KEYEVENTF_KEYUP = 0x0002
+
+    class KEYBDINPUT(ctypes.Structure):
+        _fields_ = [
+            ("wVk", wintypes.WORD),
+            ("wScan", wintypes.WORD),
+            ("dwFlags", wintypes.DWORD),
+            ("time", wintypes.DWORD),
+            ("dwExtraInfo", wintypes.ULONG_PTR),
+        ]
+
+    class INPUT(ctypes.Structure):
+        _fields_ = [("type", wintypes.DWORD), ("ki", KEYBDINPUT)]
+
+    down = INPUT(type=INPUT_KEYBOARD, ki=KEYBDINPUT(wVk=vk, wScan=0, dwFlags=0, time=0, dwExtraInfo=0))
+    up = INPUT(type=INPUT_KEYBOARD, ki=KEYBDINPUT(wVk=vk, wScan=0, dwFlags=KEYEVENTF_KEYUP, time=0, dwExtraInfo=0))
+    user32.SendInput(2, ctypes.byref((down, up)), ctypes.sizeof(INPUT))
+
+
+def send_text_unicode(text: str) -> None:
+    user32 = ctypes.windll.user32
+
+    INPUT_KEYBOARD = 1
+    KEYEVENTF_UNICODE = 0x0004
+    KEYEVENTF_KEYUP = 0x0002
+
+    class KEYBDINPUT(ctypes.Structure):
+        _fields_ = [
+            ("wVk", wintypes.WORD),
+            ("wScan", wintypes.WORD),
+            ("dwFlags", wintypes.DWORD),
+            ("time", wintypes.DWORD),
+            ("dwExtraInfo", wintypes.ULONG_PTR),
+        ]
+
+    class INPUT(ctypes.Structure):
+        _fields_ = [("type", wintypes.DWORD), ("ki", KEYBDINPUT)]
+
+    inputs = []
+    for ch in text or "":
+        code = ord(ch)
+        inputs.append(INPUT(type=INPUT_KEYBOARD, ki=KEYBDINPUT(wVk=0, wScan=code, dwFlags=KEYEVENTF_UNICODE, time=0, dwExtraInfo=0)))
+        inputs.append(INPUT(type=INPUT_KEYBOARD, ki=KEYBDINPUT(wVk=0, wScan=code, dwFlags=KEYEVENTF_UNICODE | KEYEVENTF_KEYUP, time=0, dwExtraInfo=0)))
+
+    if not inputs:
+        return
+    arr_type = INPUT * len(inputs)
+    arr = arr_type(*inputs)
+    user32.SendInput(len(inputs), ctypes.byref(arr), ctypes.sizeof(INPUT))
+
+
+def try_autofill_smartconsole(username: str | None, target_ip: str | None, log) -> bool:
+    """Best-effort: focus SmartConsole window and type Username + Server/IP (leave password blank)."""
+    if not username and not target_ip:
+        return False
+
+    # Heuristic: locate the SmartConsole login window by title.
+    for _ in range(60):
+        hwnd = try_find_window_handle_by_title("SmartConsole")
+        if hwnd:
+            bring_window_to_foreground(hwnd)
+            time.sleep(0.75)
+
+            # Type username, then tab to password, tab to server field, then type server.
+            # This matches typical SmartConsole login tab order.
+            try:
+                if username:
+                    send_text_unicode(str(username))
+                time.sleep(0.1)
+                send_vk(0x09)  # VK_TAB
+                time.sleep(0.1)
+                send_vk(0x09)  # VK_TAB
+                time.sleep(0.1)
+                if target_ip:
+                    send_text_unicode(str(target_ip))
+                log("Autofill attempted via SendInput")
+                return True
+            except Exception as exc:
+                log(f"Autofill failed: {exc}")
+                return False
+
+        time.sleep(0.5)
+
+    log("Autofill skipped: SmartConsole window not found")
+    return False
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="S1C Python launcher (PowerShell-free).")
     parser.add_argument("--api-base-url", default=DEFAULT_API_BASE_URL)
@@ -136,6 +289,11 @@ def main() -> int:
         "--with-args",
         action="store_true",
         help="Pass best-effort -u/-s args to SmartConsole (some builds may exit immediately)",
+    )
+    parser.add_argument(
+        "--no-autofill",
+        action="store_true",
+        help="Disable UI autofill (username + server/IP) via SendInput",
     )
     parser.add_argument("--wait-seconds-if-no-request", type=int, default=0, help="If >0, wait before exit when no request found")
     args = parser.parse_args()
@@ -220,6 +378,17 @@ def main() -> int:
         log(f"Failed to start SmartConsole: {exc}")
         time.sleep(10)
         return 1
+
+    # Best-effort autofill (username + server/IP). Leave password blank.
+    if not args.no_autofill:
+        try:
+            did = try_autofill_smartconsole(username=username, target_ip=target_ip, log=log)
+            if did:
+                print("[INFO] Prefilled username/server; please type password and click Login.")
+            else:
+                print("[WARN] Could not prefill fields; enter username/server manually.")
+        except Exception as exc:
+            log(f"Autofill exception: {exc}")
 
     # SmartConsole sometimes spawns a child process then the parent exits quickly.
     # For RemoteApp, we must keep this launcher process alive while SmartConsole is open.
