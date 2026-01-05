@@ -191,15 +191,78 @@ try {
     if (-not $Process) { throw "Failed to start SmartConsole" }
     Write-Log "Started SmartConsole. pid=$($Process.Id)"
 
-    # Wait for main window handle (up to 30s)
-    $handle = 0
+    # SmartConsole sometimes spawns a child process that owns the UI.
+    # We'll locate a visible window by enumerating windows for the initial PID and any related SmartConsole PIDs.
+    Add-Type @"
+using System;
+using System.Collections.Generic;
+using System.Runtime.InteropServices;
+
+public static class Win32Windows {
+  public delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
+
+  [DllImport("user32.dll")] public static extern bool EnumWindows(EnumWindowsProc lpEnumFunc, IntPtr lParam);
+  [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
+  [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr hWnd);
+}
+"@
+
+    function Get-SmartConsoleCandidatePids([int]$RootPid) {
+        $pids = New-Object System.Collections.Generic.HashSet[int]
+        $pids.Add($RootPid) | Out-Null
+        try {
+            $root = Get-Process -Id $RootPid -ErrorAction SilentlyContinue
+            $rootStart = $null
+            try { $rootStart = $root.StartTime } catch {}
+
+            # Add direct children (best-effort)
+            try {
+                $children = Get-CimInstance Win32_Process -Filter "ParentProcessId=$RootPid" -ErrorAction SilentlyContinue
+                foreach ($c in $children) { if ($c.ProcessId) { $pids.Add([int]$c.ProcessId) | Out-Null } }
+            } catch {}
+
+            # Add any SmartConsole processes launched around the same time (covers spawn/reparent)
+            if ($rootStart) {
+                try {
+                    $candidates = Get-Process -Name SmartConsole -ErrorAction SilentlyContinue
+                    foreach ($cp in $candidates) {
+                        try {
+                            if ($cp.StartTime -ge $rootStart.AddSeconds(-5)) { $pids.Add([int]$cp.Id) | Out-Null }
+                        } catch {}
+                    }
+                } catch {}
+            }
+        } catch {}
+
+        return @($pids)
+    }
+
+    function Get-FirstVisibleWindowHandleForPids([int[]]$Pids) {
+        $best = [IntPtr]::Zero
+        [Win32Windows]::EnumWindows({
+            param([IntPtr]$hWnd, [IntPtr]$lParam)
+            $outPid = 0
+            [Win32Windows]::GetWindowThreadProcessId($hWnd, [ref]$outPid) | Out-Null
+            if ($outPid -and ($Pids -contains [int]$outPid) -and [Win32Windows]::IsWindowVisible($hWnd)) {
+                $best = $hWnd
+                return $false
+            }
+            return $true
+        }, [IntPtr]::Zero) | Out-Null
+        return $best
+    }
+
+    # Wait for a visible window handle (up to 30s)
+    $handle = [IntPtr]::Zero
+    $candidatePids = Get-SmartConsoleCandidatePids -RootPid $Process.Id
+    try { Write-Log "SmartConsole candidate pids: $($candidatePids -join ',')" } catch {}
     for ($i = 0; $i -lt 60; $i++) {
-        $p = Get-Process -Id $Process.Id -ErrorAction SilentlyContinue
-        if ($p -and $p.MainWindowHandle -ne 0) { $handle = $p.MainWindowHandle; break }
+        $handle = Get-FirstVisibleWindowHandleForPids -Pids $candidatePids
+        if ($handle -and $handle -ne [IntPtr]::Zero) { break }
         Start-Sleep -Milliseconds 500
     }
 
-    if ($handle -eq 0) {
+    if (-not $handle -or $handle -eq [IntPtr]::Zero) {
         Write-Host "[WARN] Could not find SmartConsole window handle; skipping auto-fill." -ForegroundColor Yellow
         Write-Log "Could not find SmartConsole window handle; skipping auto-fill"
         Write-Host "[INFO] Waiting for SmartConsole to exit..." -ForegroundColor Cyan
@@ -236,27 +299,13 @@ public static class Win32Show {
         Add-Type -AssemblyName UIAutomationClient
         Add-Type -AssemblyName UIAutomationTypes
 
-        Add-Type @"
-using System;
-using System.Collections.Generic;
-using System.Runtime.InteropServices;
-
-public static class Win32Windows {
-  public delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
-
-  [DllImport("user32.dll")] public static extern bool EnumWindows(EnumWindowsProc lpEnumFunc, IntPtr lParam);
-  [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
-  [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr hWnd);
-}
-"@
-
-        function Get-VisibleWindowHandlesForPid([int]$Pid) {
+        function Get-VisibleWindowHandlesForPids([int[]]$Pids) {
             $handles = New-Object System.Collections.Generic.List[System.IntPtr]
             [Win32Windows]::EnumWindows({
                 param([IntPtr]$hWnd, [IntPtr]$lParam)
                 $outPid = 0
                 [Win32Windows]::GetWindowThreadProcessId($hWnd, [ref]$outPid) | Out-Null
-                if ($outPid -eq [uint32]$Pid -and [Win32Windows]::IsWindowVisible($hWnd)) {
+                if ($outPid -and ($Pids -contains [int]$outPid) -and [Win32Windows]::IsWindowVisible($hWnd)) {
                     $handles.Add($hWnd)
                 }
                 return $true
@@ -297,7 +346,7 @@ public static class Win32Windows {
             $condEdit = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ControlTypeProperty, [System.Windows.Automation.ControlType]::Edit)
             $condCombo = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ControlTypeProperty, [System.Windows.Automation.ControlType]::ComboBox)
 
-            $handles = Get-VisibleWindowHandlesForPid -Pid $Pid
+            $handles = Get-VisibleWindowHandlesForPids -Pids (Get-SmartConsoleCandidatePids -RootPid $Pid)
             if (-not $handles -or $handles.Count -lt 1) { return $false }
 
             foreach ($h in $handles) {
