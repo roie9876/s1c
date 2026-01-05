@@ -9,7 +9,7 @@ This document tracks the state of the Check Point Farm Migration PoC. Use this t
     *   **Azure Backend:** Azure Functions + Cosmos DB (stores context with 60s TTL).
     *   **Launcher (Client):** PowerShell script on AVD that polls the backend and launches the app.
 
-## Current Infrastructure State (As of Jan 4, 2026)
+## Current Infrastructure State (As of Jan 5, 2026)
 *   **Subscription:** Pay-As-You-Go
 *   **Region:** East US 2 (`eastus2`)
 *   **Resource Group:** `s1c-poc-rg`
@@ -23,10 +23,11 @@ This document tracks the state of the Check Point Farm Migration PoC. Use this t
 
 | Component | Status | Notes |
 | :--- | :--- | :--- |
-| **Azure Function** | ✅ Deployed | Python v2 model. Endpoints: `/queue_connection`, `/fetch_connection`. |
+| **Azure Function** | ✅ Deployed | Python v2 model. Endpoints: `/queue_connection`, `/fetch_connection`, `/dl` (serves Launcher). |
 | **Cosmos DB** | ✅ Active | TTL enabled (60s). Partition Key: `/userId`. |
-| **Launcher.ps1** | ✅ Verified (Manual Password) | Downloaded from `/api/dl`. Launches SmartConsole and pre-fills username + server/IP; user types password manually. |
-| **Local Portal** | ✅ Fixed | Flask App. **Issue:** Port 5000/8080 conflict. Moving to port 5001. |
+| **Launcher (downloaded)** | ✅ Verified (Manual Password) | Downloaded from `/api/dl`. Launches SmartConsole and pre-fills username + server/IP; user types password manually. **Keeps RemoteApp alive by waiting for SmartConsole to exit.** |
+| **LauncherRunner.ps1** | ✅ Updated | RemoteApp bootstrapper: downloads latest launcher from `/api/dl` (cache-busted) and executes it. |
+| **Local Portal** | ✅ Fixed | Flask App running on port **5001**. Includes PoC user mapping via `avdUserId`. |
 | **AVD Environment** | ✅ Verified | Clipboard fixed. **End-to-End Test Passed:** Launcher retrieved context and started app. |
 
 ## Recent Actions
@@ -42,6 +43,41 @@ This document tracks the state of the Check Point Farm Migration PoC. Use this t
 10. **Updated Launcher:** Switched to `SmartConsole.exe` (R82 path).
 11. **Recovered & Redeployed Function App:** Restored clean `function_app.py` and confirmed `/api/dl` returns the script (HTTP 200).
 12. **Changed Login Flow:** Auto-login was dropped; password is typed manually in SmartConsole.
+13. **RemoteApp Bootstrapper:** Publish `powershell.exe` RemoteApp to run `C:\sc1\LuancherRunner.ps1` which downloads `/api/dl`.
+14. **Anti-caching fixes:** `/api/dl` adds `Cache-Control: no-store` and runner uses `?nocache=<guid>`.
+15. **RemoteApp stability fix:** Launcher now waits for SmartConsole process to exit (prevents RemoteApp session from ending immediately).
+16. **Persistent logs added:** See “Troubleshooting & Logs” below.
+
+## RemoteApp Configuration (Known-Good)
+
+Create an AVD RemoteApp (Application Group → Applications → Add) with:
+
+- **Application source:** File path
+- **Application path:** `C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe`
+- **Require command line:** Yes
+- **Command line:** `-NoProfile -ExecutionPolicy Bypass -Command "& 'C:\sc1\LuancherRunner.ps1'"`
+- **Icon path (optional):** `C:\Program Files (x86)\CheckPoint\SmartConsole\R82\PROGRAM\SmartConsole.exe` (Icon index 0)
+
+Notes:
+- Ensure `C:\sc1\LuancherRunner.ps1` exists on the session host image (current PoC image path/name).
+- For troubleshooting, temporarily add: `-NoExit` and `Read-Host` to keep the window open.
+- The published app must remain alive; the downloaded launcher now waits for SmartConsole to exit.
+
+## Troubleshooting & Logs
+
+On the AVD session host, for the signed-in user, check:
+
+- `%TEMP%\s1c-launcher\LauncherRunner.log` (bootstrapper download/execution)
+- `%TEMP%\s1c-launcher\Launcher.log` (downloaded launcher behavior)
+
+Common causes of “PowerShell opens then closes”:
+
+1. Wrong file path/typo in RemoteApp command line (PowerShell exits immediately).
+2. `C:\S1C\LauncherRunner.ps1` missing on the session host.
+
+    (For this PoC image: confirm `C:\sc1\LuancherRunner.ps1` exists.)
+3. Network/DNS blocks to `https://s1c-function-11729.azurewebsites.net/api/dl`.
+4. No pending request for the detected userId.
 
 ## Immediate Next Steps
 1.  **AVD RemoteApp Launch:** Publish a RemoteApp that runs the Launcher automatically (no manual download/run).
@@ -50,6 +86,7 @@ This document tracks the state of the Check Point Farm Migration PoC. Use this t
     *   If they differ: add a mapping step (Portal stores “AVD UPN” alongside the Portal email and queues requests using the AVD UPN).
 3.  **Security Tightening:** Remove password from the queued payload (since password is manual now) and add auth to the Function endpoints.
 4.  **Launcher Robustness:** Improve retries/backoff and add clearer user messaging when no request is pending.
+5.  **Profile persistence:** Plan FSLogix profile containers so SmartConsole state persists for pooled host pools.
 
 ## Environment Variables / Secrets
 *   **Function App:** Managed Identity / Key based auth (currently anonymous/function level for PoC).

@@ -8,6 +8,17 @@ This document outlines the architecture and migration strategy for moving the Ch
 *   **Destination:** Azure.
 *   **Out of Scope:** Check Point Infinity Portal (will remain in AWS).
 
+## 1.1 PoC Snapshot (Jan 2026)
+
+The Proof of Concept in this repo validates the Azure “Pull” model end-to-end using:
+
+- **Broker:** Azure Functions (Python v2) + Cosmos DB (NoSQL) with per-item TTL (~60s), partition key `/userId`.
+- **Launcher:** PowerShell wrapper in AVD that fetches a pending request and opens SmartConsole.
+- **Login mode (PoC):** **Manual password entry**. Launcher pre-fills username + server/IP; user types password.
+- **RemoteApp:** Publish `powershell.exe` RemoteApp to run a bootstrap script (`LauncherRunner.ps1`) that downloads the latest launcher from `/api/dl`.
+
+This PoC deliberately avoids auto-login/password injection because SmartConsole versions R81+ are not reliably compatible with cleartext password injection mechanisms.
+
 ## 2. Current Architecture (AWS)
 
 ### Components
@@ -171,8 +182,8 @@ Since we cannot push context via the URL in AVD, and users may have multiple con
     *   API returns the details for "Customer A" and updates status to `CONSUMED`.
 
 5.  **Application Start:**
-    *   Launcher executes: `SmartConsole.exe -u admin -p **** -t 1.2.3.4`.
-    *   Smart Console opens, connected to Customer A.
+    *   **PoC behavior:** Launcher starts SmartConsole and pre-fills username + server/IP. The user types the password manually.
+    *   **Future:** Evaluate supported SSO/token-based approaches if true auto-login is required.
 
 6.  **MSSP Scenario (Multiple Connections):**
     *   User goes back to Portal, clicks "Customer B".
@@ -195,11 +206,15 @@ Since we cannot push context via the URL in AVD, and users may have multiple con
 **Solution: The Launcher Pattern**
 *   We do not publish `SmartConsole.exe` directly.
 *   We publish a custom **Launcher** (C#/.NET or PowerShell wrapper).
-*   **Mechanism:**
-    *   The Launcher handles the API call to fetch credentials.
-    *   It constructs the command line arguments for Smart Console.
-    *   It uses `Process.Start()` to run the console.
-    *   *Security Note:* Command line arguments can be visible to other admins on the machine. If this is a risk, we will use a temporary secure config file or memory injection.
+*   **PoC Mechanism (current):**
+    *   The Launcher fetches the pending request (server/IP + username).
+    *   It launches SmartConsole and uses UI automation to pre-fill fields.
+    *   The user types the password manually.
+    *   This avoids putting passwords into command line arguments.
+
+*   **RemoteApp detail (important):**
+    *   When publishing a PowerShell-based RemoteApp, the session often ends when the published process exits.
+    *   The PoC launcher keeps the RemoteApp alive by waiting for the SmartConsole process to exit.
 
 ### Challenge 3: "Pull" Model Latency
 **Problem:** User clicks "Connect", then launches app. What if they launch the app *before* clicking connect?

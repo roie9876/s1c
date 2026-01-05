@@ -17,13 +17,22 @@ The goal is to migrate the existing AWS-based infrastructure to Azure, replacing
 *   **[POC/](POC/)**: Proof of Concept implementation code.
     *   **[POC/AzureFunction/](POC/AzureFunction/)**: Azure Functions (Python) acting as the broker API.
     *   **[POC/LocalPortal/](POC/LocalPortal/)**: A local simulator for the Infinity Portal to test the flow.
-    *   **[POC/Launcher.ps1](POC/Launcher.ps1)**: PowerShell script simulating the client-side launcher in AVD.
+    *   **[POC/LauncherRunner.ps1](POC/LauncherRunner.ps1)**: AVD RemoteApp bootstrapper. Downloads the latest launcher from `/api/dl` and runs it.
+    *   **[POC/Launcher.ps1](POC/Launcher.ps1)**: Legacy/experimental launcher (auto-login attempts). Not the current PoC path.
 *   **[aws screnshots/](aws%20screnshots/)**: Reference images of the current AWS environment.
 
 ## Getting Started
 
 1.  Review the **[Migration Plan](MIGRATION_PLAN.md)** to understand the architecture.
 2.  Navigate to the **[POC](POC/)** folder to explore the code and run the local simulation.
+
+## Current PoC State (Jan 2026)
+
+- **Launcher flow:** Manual password entry. The launcher pre-fills username + server/IP in SmartConsole; user types password.
+- **RemoteApp:** Publish `powershell.exe` RemoteApp that runs `C:\\sc1\\LuancherRunner.ps1` (current PoC image path/name).
+- **Broker API:** Azure Function endpoints under `https://s1c-function-11729.azurewebsites.net/api`.
+
+See **[POC_TRACKING.md](POC_TRACKING.md)** for the handoff/runbook.
 
 ## Key Technologies
 

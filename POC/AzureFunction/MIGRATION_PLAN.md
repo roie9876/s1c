@@ -1,5 +1,9 @@
 # Migration Project: Check Point Farm & Smart Console Access (AWS to Azure)
 
+> Note: This file is a historical copy. The authoritative plan is the repository root
+> [MIGRATION_PLAN.md](../../MIGRATION_PLAN.md) and the up-to-date PoC handoff/runbook is
+> [POC_TRACKING.md](../../POC_TRACKING.md).
+
 ## 1. Project Overview
 This document outlines the architecture and migration strategy for moving the Check Point "Farm" environment and the Smart Console access mechanism from Amazon Web Services (AWS) to Microsoft Azure. 
 
