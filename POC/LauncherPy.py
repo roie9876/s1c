@@ -23,7 +23,7 @@ DEFAULT_API_BASE_URL = "https://s1c-function-11729.azurewebsites.net/api"
 DEFAULT_SMARTCONSOLE_PATH = r"C:\Program Files (x86)\CheckPoint\SmartConsole\R82\PROGRAM\SmartConsole.exe"
 DEFAULT_SMARTCONSOLE_DIR = r"C:\Program Files (x86)\CheckPoint\SmartConsole\R82\PROGRAM"
 
-LAUNCHER_VERSION = "2026-01-05-autofill11"
+LAUNCHER_VERSION = "2026-01-05-autofill12"
 
 
 def _now_iso() -> str:
@@ -154,6 +154,39 @@ def persist_env_var_setx(name: str, value: str, log) -> bool:
     except Exception as exc:
         log(f"setx exception name={name}: {exc}")
         return False
+
+
+def _mask_secret(value: str | None) -> str:
+    if not value:
+        return ""
+    s = str(value)
+    if len(s) <= 4:
+        return "****"
+    return s[:2] + "***" + s[-2:]
+
+
+def pause_seconds(seconds: int, log=None) -> None:
+    try:
+        sec = int(seconds)
+    except Exception:
+        sec = 0
+    if sec <= 0:
+        return
+    if log:
+        log(f"Pausing for {sec}s")
+    time.sleep(sec)
+
+
+def pause_for_keypress_windows(log=None) -> None:
+    """Best-effort 'press any key' pause using cmd.exe. Safe fallback to short sleep."""
+    try:
+        completed = subprocess.run(["cmd.exe", "/c", "pause"], check=False)
+        if log:
+            log(f"pause cmd rc={completed.returncode}")
+    except Exception as exc:
+        if log:
+            log(f"pause cmd failed: {exc}")
+        time.sleep(10)
 
 
 def is_image_running(image_name: str) -> bool:
@@ -942,6 +975,42 @@ def main() -> int:
         action="store_true",
         help="Disable UI autofill (username + server/IP) via SendInput",
     )
+    parser.add_argument(
+        "--export-env",
+        action="store_true",
+        help="Export username/ip/(password if present) to process env vars (S1C_USERNAME/S1C_TARGET_IP/S1C_PASSWORD)",
+    )
+    parser.add_argument(
+        "--persist-env",
+        action="store_true",
+        help="Persist env vars for the user using setx (takes effect for new sessions/processes)",
+    )
+    parser.add_argument(
+        "--persist-password",
+        action="store_true",
+        help="When used with --persist-env, also persist S1C_PASSWORD (not recommended)",
+    )
+    parser.add_argument(
+        "--show-connection",
+        action="store_true",
+        help="Print fetched username/ip/(masked password) to the console",
+    )
+    parser.add_argument(
+        "--show-password",
+        action="store_true",
+        help="When printing connection, show password in cleartext (NOT recommended)",
+    )
+    parser.add_argument(
+        "--pause-seconds-after-display",
+        type=int,
+        default=0,
+        help="If >0, sleep this many seconds after printing connection/env",
+    )
+    parser.add_argument(
+        "--pause-after-display",
+        action="store_true",
+        help="Pause with 'Press any key to continue...' after printing connection/env",
+    )
     parser.add_argument("--wait-seconds-if-no-request", type=int, default=0, help="If >0, wait before exit when no request found")
     args = parser.parse_args()
 
@@ -1005,11 +1074,40 @@ def main() -> int:
 
     target_ip = payload.get("targetIp")
     username = payload.get("username")
+    # Optional: password may or may not exist in the payload depending on the broker.
+    password = payload.get("password") if isinstance(payload, dict) else None
 
     print("[SUCCESS] Connection Request Found!")
     print(f"    Target: {target_ip}")
     print(f"    User:   {username}")
     log(f"Connection found. targetIp={target_ip} username={username}")
+
+    # Optional: show on-screen for RemoteApp scenarios.
+    if args.show_connection:
+        shown_pw = str(password or "") if args.show_password else _mask_secret(password)
+        print("[INFO] Connection details:")
+        print(f"  S1C_USERNAME  = {username or ''}")
+        print(f"  S1C_TARGET_IP = {target_ip or ''}")
+        if password is not None:
+            print(f"  S1C_PASSWORD  = {shown_pw}")
+        else:
+            print("  S1C_PASSWORD  = (not provided)")
+
+    # Export to env vars for downstream tools/child processes.
+    if args.export_env or args.persist_env:
+        export_connection_to_env(username=username, target_ip=target_ip, password=password, log=log)
+        if args.persist_env:
+            persist_env_var_setx("S1C_USERNAME", str(username or ""), log)
+            persist_env_var_setx("S1C_TARGET_IP", str(target_ip or ""), log)
+            if args.persist_password:
+                # WARNING: persisting passwords in env vars is insecure; user explicitly requested.
+                persist_env_var_setx("S1C_PASSWORD", str(password or ""), log)
+
+    if args.show_connection and (args.pause_seconds_after_display > 0 or args.pause_after_display):
+        if args.pause_seconds_after_display > 0:
+            pause_seconds(args.pause_seconds_after_display, log=log)
+        if args.pause_after_display:
+            pause_for_keypress_windows(log=log)
 
     if not os.path.exists(args.smartconsole_path):
         print(f"[ERROR] SmartConsole not found at: {args.smartconsole_path}")
