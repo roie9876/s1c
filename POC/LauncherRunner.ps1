@@ -27,7 +27,8 @@ try {
         # If this fails, continue and let the web request decide.
     }
 
-    $launcherUrl = "$FunctionBaseUrl/api/dl"
+    $cacheBust = [Guid]::NewGuid().ToString('N')
+    $launcherUrl = "$FunctionBaseUrl/api/dl?nocache=$cacheBust"
     $tempDir = Join-Path $env:TEMP "s1c-launcher"
     $launcherPath = Join-Path $tempDir "Launcher.ps1"
 
@@ -36,7 +37,10 @@ try {
     }
 
     Write-Host "[INFO] Downloading launcher from: $launcherUrl" -ForegroundColor Cyan
-    Invoke-WebRequest -Uri $launcherUrl -UseBasicParsing -OutFile $launcherPath
+    Invoke-WebRequest -Uri $launcherUrl -UseBasicParsing -OutFile $launcherPath -Headers @{
+        'Cache-Control' = 'no-cache'
+        'Pragma'        = 'no-cache'
+    }
 
     # Unblock (harmless if not needed)
     try { Unblock-File -Path $launcherPath -ErrorAction SilentlyContinue } catch {}

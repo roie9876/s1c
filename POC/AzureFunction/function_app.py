@@ -186,7 +186,15 @@ catch {
     Read-Host "Press Enter to exit..."
 }
 '''
-    return func.HttpResponse(script_content, mimetype="text/plain", status_code=200)
+    return func.HttpResponse(
+        script_content,
+        mimetype="text/plain",
+        status_code=200,
+        headers={
+            "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+            "Pragma": "no-cache",
+        },
+    )
 
 
 @app.route(route="wdac", auth_level=func.AuthLevel.ANONYMOUS)
