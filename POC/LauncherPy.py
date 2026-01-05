@@ -116,7 +116,11 @@ def main() -> int:
     parser.add_argument("--smartconsole-path", default=DEFAULT_SMARTCONSOLE_PATH)
     parser.add_argument("--smartconsole-dir", default=DEFAULT_SMARTCONSOLE_DIR)
     parser.add_argument("--http-timeout", type=int, default=15)
-    parser.add_argument("--no-smartconsole-args", action="store_true", help="Do not pass -u/-s args to SmartConsole")
+    parser.add_argument(
+        "--with-args",
+        action="store_true",
+        help="Pass best-effort -u/-s args to SmartConsole (some builds may exit immediately)",
+    )
     parser.add_argument("--wait-seconds-if-no-request", type=int, default=0, help="If >0, wait before exit when no request found")
     args = parser.parse_args()
 
@@ -182,10 +186,11 @@ def main() -> int:
         time.sleep(10)
         return 1
 
+    # Default: start SmartConsole with no args (most compatible).
+    # Some SmartConsole builds exit immediately if passed unsupported args.
     cmd = [args.smartconsole_path]
-    if not args.no_smartconsole_args:
-        # Try to prefill without passing password.
-        # If SmartConsole ignores these flags, user can still type manually.
+    if args.with_args:
+        # Best-effort prefill without password.
         if username:
             cmd += ["-u", str(username)]
         if target_ip:
@@ -198,6 +203,15 @@ def main() -> int:
         print(f"[ERROR] Failed to start SmartConsole: {exc}")
         log(f"Failed to start SmartConsole: {exc}")
         time.sleep(10)
+        return 1
+
+    # If it exits immediately, surface exit code for troubleshooting.
+    time.sleep(5)
+    if proc.poll() is not None:
+        rc = proc.returncode
+        print(f"[WARN] SmartConsole exited quickly (rc={rc}).")
+        print("       Check %TEMP%\\s1c-launcher\\LauncherPy.log and Windows Event Viewer (Application).")
+        log(f"SmartConsole exited quickly rc={rc}")
         return 1
 
     print("[INFO] Waiting for SmartConsole to exit...")
