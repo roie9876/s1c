@@ -25,7 +25,7 @@ This document tracks the state of the Check Point Farm Migration PoC. Use this t
 | :--- | :--- | :--- |
 | **Azure Function** | ✅ Deployed | Python v2 model. Endpoints: `/queue_connection`, `/fetch_connection`. |
 | **Cosmos DB** | ✅ Active | TTL enabled (60s). Partition Key: `/userId`. |
-| **Launcher.ps1** | ⚠️ Ready to Test | Updated with Prod URL. Needs validation in actual AVD or simulated env. |
+| **Launcher.ps1** | ✅ Verified (Manual Password) | Downloaded from `/api/dl`. Launches SmartConsole and pre-fills username + server/IP; user types password manually. |
 | **Local Portal** | ✅ Fixed | Flask App. **Issue:** Port 5000/8080 conflict. Moving to port 5001. |
 | **AVD Environment** | ✅ Verified | Clipboard fixed. **End-to-End Test Passed:** Launcher retrieved context and started app. |
 
@@ -40,15 +40,16 @@ This document tracks the state of the Check Point Farm Migration PoC. Use this t
 8.  Added `/dl` endpoint to Azure Function for easy script download.
 9.  **Verified End-to-End Flow:** Portal -> Azure -> AVD -> Launcher -> App Launch.
 10. **Updated Launcher:** Switched to `SmartConsole.exe` (R82 path).
+11. **Recovered & Redeployed Function App:** Restored clean `function_app.py` and confirmed `/api/dl` returns the script (HTTP 200).
+12. **Changed Login Flow:** Auto-login was dropped; password is typed manually in SmartConsole.
 
 ## Immediate Next Steps
-1.  **Verify SmartConsole Launch:** Download the updated script in AVD and run it.
-2.  **Security Hardening:** Implement authentication for the Azure Function (currently Anonymous).
-    *   **AVD:** Copy `Launcher.ps1` to VM and run it.
-    *   **Verify:** Notepad opens with the correct IP/User.
-    *   Run Launcher (Local PowerShell).
-    *   Verify "Connect" click -> Cosmos DB entry -> Launcher retrieval.
-3.  **Refinement:** Add better error handling to `Launcher.ps1` if the backend is down.
+1.  **AVD RemoteApp Launch:** Publish a RemoteApp that runs the Launcher automatically (no manual download/run).
+2.  **Identity Alignment:** Confirm the `userId` used by the portal equals the AVD user's Entra UPN.
+    *   For PoC: use the same email address (Infinity Portal “working email”) as the Entra UPN.
+    *   If they differ: add a mapping step (Portal stores “AVD UPN” alongside the Portal email and queues requests using the AVD UPN).
+3.  **Security Tightening:** Remove password from the queued payload (since password is manual now) and add auth to the Function endpoints.
+4.  **Launcher Robustness:** Improve retries/backoff and add clearer user messaging when no request is pending.
 
 ## Environment Variables / Secrets
 *   **Function App:** Managed Identity / Key based auth (currently anonymous/function level for PoC).
