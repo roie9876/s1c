@@ -323,25 +323,47 @@ public static class Win32Windows {
                         if ($e.Current.IsOffscreen) { continue }
                     } catch {}
 
-                    $top = 0; $left = 0
+                    $top = 0; $left = 0; $w = 0; $hgt = 0; $rectStr = ''
                     try {
                         $rect = $e.Current.BoundingRectangle
                         $top = [double]$rect.Top
                         $left = [double]$rect.Left
+                        $w = [double]$rect.Width
+                        $hgt = [double]$rect.Height
+                        $rectStr = "$([math]::Round($rect.Left)), $([math]::Round($rect.Top)) $([math]::Round($rect.Width))x$([math]::Round($rect.Height))"
                     } catch {}
-                    $nonPwd += [PSCustomObject]@{ El = $e; Top = $top; Left = $left }
+
+                    # Heuristic: input fields are usually wide (avoid tiny icon edits/spinners).
+                    if ($w -lt 140 -or $hgt -lt 18) { continue }
+
+                    $nm = ''; $aid = ''; $cls = ''
+                    try { $nm = $e.Current.Name } catch {}
+                    try { $aid = $e.Current.AutomationId } catch {}
+                    try { $cls = $e.Current.ClassName } catch {}
+
+                    $nonPwd += [PSCustomObject]@{ El = $e; Top = $top; Left = $left; W = $w; H = $hgt; Name = $nm; AId = $aid; Class = $cls; Rect = $rectStr }
                 }
 
                 if (-not $nonPwd -or $nonPwd.Count -lt 1) { continue }
                 $sorted = $nonPwd | Sort-Object Top, Left
 
+                # Most SmartConsole login UIs expose 2 non-password input fields: Username and Server/IP.
+                # Use vertical order: top is username; next is server.
                 $userEdit = $sorted[0].El
                 $serverEdit = $null
                 if ($sorted.Count -ge 2) {
-                    $serverEdit = $sorted[$sorted.Count - 1].El
+                    $serverEdit = $sorted[1].El
+                } else {
+                    $serverEdit = $sorted[0].El
                 }
 
-                Write-Log "UIA window='$winName' edits=$($edits.Count) nonPwd=$($sorted.Count)"
+                Write-Log "UIA window='$winName' edits=$($edits.Count) nonPwdCandidates=$($sorted.Count)"
+                # Log up to 5 candidates to help diagnose cp2 differences.
+                $max = [Math]::Min(5, $sorted.Count)
+                for ($ci = 0; $ci -lt $max; $ci++) {
+                    $c = $sorted[$ci]
+                    Write-Log ("UIA cand[{0}] name='{1}' aid='{2}' class='{3}' rect='{4}'" -f $ci, $c.Name, $c.AId, $c.Class, $c.Rect)
+                }
 
                 $didUser = Set-ElementValue -El $userEdit -Value $User -Label 'Username'
                 $didServer = $false
