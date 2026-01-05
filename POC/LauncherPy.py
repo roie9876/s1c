@@ -16,6 +16,8 @@ DEFAULT_API_BASE_URL = "https://s1c-function-11729.azurewebsites.net/api"
 DEFAULT_SMARTCONSOLE_PATH = r"C:\Program Files (x86)\CheckPoint\SmartConsole\R82\PROGRAM\SmartConsole.exe"
 DEFAULT_SMARTCONSOLE_DIR = r"C:\Program Files (x86)\CheckPoint\SmartConsole\R82\PROGRAM"
 
+LAUNCHER_VERSION = "2026-01-05-autofill2"
+
 
 def _now_iso() -> str:
     return datetime.datetime.now().isoformat(timespec="seconds")
@@ -131,8 +133,9 @@ def try_find_window_handle_by_title(substr: str) -> int:
     """Finds the first visible top-level window whose title contains substr (case-insensitive)."""
     user32 = ctypes.windll.user32
 
+    EnumWindowsProc = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
     EnumWindows = user32.EnumWindows
-    EnumWindows.argtypes = [wintypes.WNDPROC, wintypes.LPARAM]
+    EnumWindows.argtypes = [EnumWindowsProc, wintypes.LPARAM]
     EnumWindows.restype = wintypes.BOOL
 
     IsWindowVisible = user32.IsWindowVisible
@@ -150,7 +153,7 @@ def try_find_window_handle_by_title(substr: str) -> int:
     target = (substr or "").lower()
     found = {"hwnd": 0}
 
-    @wintypes.WNDPROC
+    @EnumWindowsProc
     def enum_proc(hwnd, lparam):
         try:
             if not IsWindowVisible(hwnd):
@@ -185,6 +188,63 @@ def bring_window_to_foreground(hwnd: int) -> None:
         user32.SetForegroundWindow(wintypes.HWND(hwnd))
     except Exception:
         pass
+
+
+def click_relative(hwnd: int, x_ratio: float, y_ratio: float) -> None:
+    """Clicks inside a window at a relative coordinate (0..1). Best-effort."""
+    if not hwnd:
+        return
+    user32 = ctypes.windll.user32
+
+    class RECT(ctypes.Structure):
+        _fields_ = [("left", wintypes.LONG), ("top", wintypes.LONG), ("right", wintypes.LONG), ("bottom", wintypes.LONG)]
+
+    rect = RECT()
+    if not user32.GetWindowRect(wintypes.HWND(hwnd), ctypes.byref(rect)):
+        return
+
+    width = max(1, rect.right - rect.left)
+    height = max(1, rect.bottom - rect.top)
+    x = int(rect.left + (width * max(0.0, min(1.0, x_ratio))))
+    y = int(rect.top + (height * max(0.0, min(1.0, y_ratio))))
+
+    # Move + click using SendInput
+    INPUT_MOUSE = 0
+    MOUSEEVENTF_MOVE = 0x0001
+    MOUSEEVENTF_ABSOLUTE = 0x8000
+    MOUSEEVENTF_LEFTDOWN = 0x0002
+    MOUSEEVENTF_LEFTUP = 0x0004
+
+    class MOUSEINPUT(ctypes.Structure):
+        _fields_ = [
+            ("dx", wintypes.LONG),
+            ("dy", wintypes.LONG),
+            ("mouseData", wintypes.DWORD),
+            ("dwFlags", wintypes.DWORD),
+            ("time", wintypes.DWORD),
+            ("dwExtraInfo", wintypes.ULONG_PTR),
+        ]
+
+    class INPUT(ctypes.Structure):
+        _fields_ = [("type", wintypes.DWORD), ("mi", MOUSEINPUT)]
+
+    # Convert to absolute (0..65535)
+    screen_w = user32.GetSystemMetrics(0)
+    screen_h = user32.GetSystemMetrics(1)
+    ax = int(x * 65535 / max(1, screen_w - 1))
+    ay = int(y * 65535 / max(1, screen_h - 1))
+
+    def _inp(flags: int, dx: int = ax, dy: int = ay):
+        return INPUT(type=INPUT_MOUSE, mi=MOUSEINPUT(dx=dx, dy=dy, mouseData=0, dwFlags=flags, time=0, dwExtraInfo=0))
+
+    seq = [
+        _inp(MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE),
+        _inp(MOUSEEVENTF_LEFTDOWN, dx=0, dy=0),
+        _inp(MOUSEEVENTF_LEFTUP, dx=0, dy=0),
+    ]
+    arr_type = INPUT * len(seq)
+    arr = arr_type(*seq)
+    user32.SendInput(len(seq), ctypes.byref(arr), ctypes.sizeof(INPUT))
 
 
 def send_vk(vk: int) -> None:
@@ -254,6 +314,14 @@ def try_autofill_smartconsole(username: str | None, target_ip: str | None, log) 
             bring_window_to_foreground(hwnd)
             time.sleep(0.75)
 
+            # Click the Username field area (relative coords tuned for the R82 login UI).
+            # This improves reliability in RemoteApp where focus can land elsewhere.
+            try:
+                click_relative(hwnd, x_ratio=0.70, y_ratio=0.23)
+                time.sleep(0.15)
+            except Exception as exc:
+                log(f"Click focus failed: {exc}")
+
             # Type username, then tab to password, tab to server field, then type server.
             # This matches typical SmartConsole login tab order.
             try:
@@ -266,7 +334,7 @@ def try_autofill_smartconsole(username: str | None, target_ip: str | None, log) 
                 time.sleep(0.1)
                 if target_ip:
                     send_text_unicode(str(target_ip))
-                log("Autofill attempted via SendInput")
+                log("Autofill attempted via SendInput (click+type)")
                 return True
             except Exception as exc:
                 log(f"Autofill failed: {exc}")
@@ -310,6 +378,8 @@ def main() -> int:
             pass
 
     log("LauncherPy started")
+    log(f"version={LAUNCHER_VERSION}")
+    print(f"[INFO] LauncherPy version: {LAUNCHER_VERSION}")
     log(f"host={os.environ.get('COMPUTERNAME','')} session={os.environ.get('SESSIONNAME','')} user={os.environ.get('USERNAME','')}")
 
     bootstrap_user_profile(log)
