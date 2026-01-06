@@ -21,25 +21,7 @@ This PoC deliberately avoids auto-login/password injection because SmartConsole 
 
 ## 2. Current Architecture (AWS)
 
-### 2.3 Authentication & Access Brokering (Infinity Portal + AWS AppStream)
-
-**Infinity Portal authentication (current):**
-- The portal authentication flow is vendor-managed and session-based.
-- In the captured login HAR, authentication is initiated via a Check Point CloudInfra gateway endpoint under the portal domain (SAML-oriented), for example:
-    - `https://cloudinfra-gw.portal.checkpoint.com/api/v1/ci-saml/authenticate` (with additional query parameters such as realm/sourceProductId).
-- The result is an authenticated browser session (cookies on `*.checkpoint.com` / `*.portal.checkpoint.com`). After the session is established, subsequent portal actions rely on the session rather than repeatedly collecting credentials.
-- Unless explicit federation is configured, there is no evidence in the default flow that an external IdP (for example AWS Cognito or Microsoft Entra ID) is participating.
-
-**Smart-1 Cloud launch via AppStream (current):**
-- The Infinity Portal acts as an access broker; the user does not authenticate to AWS directly.
-- Clicking the Smart-1 Cloud tile triggers a browser call to a Check Point backend API authorized by the existing Infinity session, for example:
-    - `https://cloudinfra-gw-us.portal.checkpoint.com/app/maas/api/v1/tenant/<tenant-guid>/appstream` (HTTP 200).
-- The response contains a short-lived, service-generated AppStream authentication URL, for example:
-    - `https://appstream2.us-east-1.aws.amazon.com/authenticate?parameters=<...>&signature=<...>`
-- This indicates a delegated brokered launch: Check Point (server-side) uses its AWS trust/permissions to mint a signed one-time AppStream launch token; AppStream validates the token and starts the streaming session.
-
-
-### Components
+### 2.1 Components
 1.  **Infinity Portal (AWS)**
     *   **Role:** User registration, authentication, and account management.
     *   **Function:** Acts as the entry point. Users select the specific Check Point Management Server they wish to manage.
@@ -60,7 +42,7 @@ This PoC deliberately avoids auto-login/password injection because SmartConsole 
         *   Custom Decryption/Helper App.
     *   **Flow:** Delivers the Smart Console application UI to the user's browser or client.
 
-### Current Workflow
+### 2.2 Current Workflow ("Push" model)
 1.  **User Action:** User logs into Infinity Portal and selects a Management Server to connect to.
 2.  **Payload Generation:** Infinity Portal retrieves the target Management Server details (IP, Username, Password).
 3.  **Encryption:** These details are encrypted.
@@ -70,7 +52,24 @@ This PoC deliberately avoids auto-login/password injection because SmartConsole 
 7.  **Auto-Login:** The helper app launches Smart Console and injects the credentials/IP.
 8.  **Result:** User sees the Smart Console connected to their specific Management Server without typing credentials.
 
-### 2.1 AWS Environment Artifacts & User Experience
+### 2.3 Authentication & Access Brokering (Infinity Portal + AWS AppStream)
+
+**Infinity Portal authentication (current):**
+- The portal authentication flow is vendor-managed and session-based.
+- In the captured login HAR, authentication is initiated via a Check Point CloudInfra gateway endpoint under the portal domain (SAML-oriented), for example:
+    - `https://cloudinfra-gw.portal.checkpoint.com/api/v1/ci-saml/authenticate` (with additional query parameters such as realm/sourceProductId).
+- The result is an authenticated browser session (cookies on `*.checkpoint.com` / `*.portal.checkpoint.com`). After the session is established, subsequent portal actions rely on the session rather than repeatedly collecting credentials.
+- Unless explicit federation is configured, there is no evidence in the default flow that an external IdP (for example AWS Cognito or Microsoft Entra ID) is participating.
+
+**Smart-1 Cloud launch via AppStream (current):**
+- The Infinity Portal acts as an access broker; the user does not authenticate to AWS directly.
+- Clicking the Smart-1 Cloud tile triggers a browser call to a Check Point backend API authorized by the existing Infinity session, for example:
+    - `https://cloudinfra-gw-us.portal.checkpoint.com/app/maas/api/v1/tenant/<tenant-guid>/appstream` (HTTP 200).
+- The response contains a short-lived, service-generated AppStream authentication URL, for example:
+    - `https://appstream2.us-east-1.aws.amazon.com/authenticate?parameters=<...>&signature=<...>`
+- This indicates a delegated brokered launch: Check Point (server-side) uses its AWS trust/permissions to mint a signed one-time AppStream launch token; AppStream validates the token and starts the streaming session.
+
+### 2.4 AWS Environment Artifacts & User Experience
 **Observed URL Structure (AppStream):**
 The connection process involves a URL transition:
 
@@ -111,7 +110,7 @@ https://63a5b2f67a09659106a68182d383d8645f3ccda0e1cf7b76689df1d7.appstream2.us-e
 4.  **Smart Console UI:** The full Windows application running inside the browser window.
     ![Smart Console UI](./aws%20screnshots/s1c-image4.png)
 
-### 2.2 Technical Analysis of AWS AppStream Flow (Confirmed via Trace)
+### 2.5 Technical Analysis of AWS AppStream Flow (Confirmed via Trace)
 Based on the analysis of the network trace (`portal.checkpoint.com.har`), the flow is confirmed as follows:
 
 1.  **API Call to Infinity Portal:**
@@ -140,9 +139,15 @@ Based on the analysis of the network trace (`portal.checkpoint.com.har`), the fl
 
 ---
 
-## 3. Proposed Architecture (Azure)
+## 3. Migration Constraints (Why AVD is different)
 
-### 3.0 Architecture Figure (Infinity Portal + AVD + Function + Cosmos)
+1.  **No sensitive context in the AVD URL:** AVD Web Client does not support an AppStream-style `&context=` parameter.
+2.  **No portal-minted AVD login token:** Unlike AppStream `.../authenticate?...&signature=...`, there is no supported mechanism for a third-party portal to mint a signed one-time URL that logs the user into AVD without Microsoft Entra ID authentication.
+3.  **Identity must align to Entra ID:** Any “pull” lookup must be keyed by the Entra ID identity in the session (typically UPN/email).
+
+## 4. Proposed Architecture (Azure)
+
+### 4.0 Architecture Figure (Infinity Portal + AVD + Function + Cosmos)
 
 ```mermaid
 flowchart LR
@@ -208,7 +213,7 @@ Since we cannot push context via the URL in AVD, and users may have multiple con
         5.  Launcher marks request as `CONSUMED`.
         6.  Launches `SmartConsole.exe` with the retrieved credentials.
 
-### 3.1 Detailed Workflow (The "Queue" Flow)
+### 4.1 Detailed Workflow (The "Queue" Flow)
 
 #### Normal user login flow (Mermaid)
 
@@ -240,7 +245,7 @@ flowchart TD
 
 4.  **Context Retrieval (Launcher):**
     *   The "Launcher" app starts in the AVD session.
-    *   It calls `GET /api/fetch-connection?user=roie@mssp.com`.
+    *   It calls `GET /api/fetch-connection?userId=roie@mssp.com`.
     *   API checks Cosmos DB for the *latest* `PENDING` request for this user.
     *   API returns the details for "Customer A" and updates status to `CONSUMED`.
 
@@ -255,7 +260,7 @@ flowchart TD
     *   New Launcher instance starts -> fetches "Customer B" -> Launches Console B.
     *   **Result:** User has two windows open: one for A, one for B.
 
-## 4. Key Challenges & Solutions
+## 5. Key Challenges & Solutions
 
 ### Challenge 1: Identity Provider Mismatch (Infinity Portal vs. Entra ID)
 **Problem:** Infinity Portal uses a proprietary IdP. AVD requires Entra ID (Azure AD).
@@ -300,7 +305,45 @@ flowchart TD
 *   If no PENDING request is found, the Launcher displays: *"No pending connection found. Please initiate a connection from the Infinity Portal."*
 *   It can include a "Refresh" button to poll the queue again.
 
-## 5. User Experience Validation (Based on Smart-1 Cloud)
+### Challenge 4: Latency (Network + User Experience)
+**The Issue:** The Management Server is in Azure, the Smart Console (AVD) is in Azure, but the User is remote.
+**Solution:**
+*   Ensure AVD Host Pool and Management VM Farm are in the **same Azure Region** to minimize console-to-server latency.
+*   Use **AVD RDP Shortpath** to optimize the UDP connection from the user's home/office to the Azure VDI.
+
+### Challenge 5: Automation & Orchestration
+**The Issue:** Creating new Management Servers for new customers automatically.
+**Solution:**
+*   Use **Terraform** or **Bicep** to define the Management Server VM template.
+*   Trigger deployment via **Azure Functions** when a new customer signs up in Infinity Portal.
+
+## 6. Portal Routing & Entry Point (Migration Strategy)
+
+**New Discovery:**
+*   **Unique Login URL:** `https://portal.checkpoint.com/signin/cp/<SHORT_ID>` (e.g., `c4b83f3f`)
+*   **Account ID:** Full GUID (e.g., `c4b83f3f-b864-4c83-ad62-5df7deb98146`)
+
+**Architectural Significance:**
+This URL acts as the **Tenant Resolver**.
+1.  **Entry:** User hits the Unique Login URL.
+2.  **Resolution:** Infinity Portal resolves `<SHORT_ID>` to the full **Account ID**.
+3.  **Routing:** The Portal knows which "Farm" (AWS or Azure) this account belongs to.
+4.  **Migration Strategy:**
+    *   This URL remains hosted in AWS (Infinity Portal).
+    *   When user logs in, Portal checks: "Is Account `<SHORT_ID>` migrated to Azure?"
+    *   **If True (Azure):** Redirect user to the **AVD Web Client** URL instead of the AppStream URL.
+
+**Updated User Journey:**
+1.  User clicks `https://portal.checkpoint.com/signin/cp/<SHORT_ID>`
+2.  Infinity Portal authenticates user.
+3.  Portal checks DB: "Where is Account `<SHORT_ID>` hosted?" -> **Answer: Azure**.
+4.  Portal generates "Connection Context" (User/Pass/IP) and saves to backend (short-lived).
+5.  Portal redirects browser to: `https://windows.cloud.microsoft/webclient/...`
+6.  AVD Session starts -> Launcher pulls context -> Smart Console launches.
+
+## 7. Deep Dives & Design Notes
+
+### 7.1 User Experience Validation (Based on Smart-1 Cloud)
 
 **Current Experience (AWS):**
 *   **Interface:** The user sees the Smart Console UI directly inside their web browser (as shown in your screenshot).
@@ -316,31 +359,7 @@ flowchart TD
     3.  Portal detects "Azure Tenant".
     4.  **Context Lookup:** The `<MANAGEMENT_ID>` (e.g., `ifmRJurBAnvXSDfVUwXyv8`) is the key used by the Helper App to fetch the correct IP/Credentials from the backend.
 
-## 6. Account Context & Entry Point Analysis
-
-**New Discovery:**
-*   **Unique Login URL:** `https://portal.checkpoint.com/signin/cp/<SHORT_ID>` (e.g., `c4b83f3f`)
-*   **Account ID:** Full GUID (e.g., `c4b83f3f-b864-4c83-ad62-5df7deb98146`)
-
-**Architectural Significance:**
-This URL acts as the **Tenant Resolver**.
-1.  **Entry:** User hits the Unique Login URL.
-2.  **Resolution:** Infinity Portal resolves `<SHORT_ID>` to the full **Account ID**.
-3.  **Routing:** The Portal knows which "Farm" (AWS or Azure) this account belongs to.
-4.  **Migration Strategy:**
-    *   This URL remains hosted in AWS (Infinity Portal).
-    *   When user logs in, Portal checks: "Is Account `c4b83f3f` migrated to Azure?"
-    *   **If True (Azure):** Redirect user to the **AVD Web Client** URL instead of the AppStream URL.
-
-**Updated User Journey:**
-1.  User clicks `https://portal.checkpoint.com/signin/cp/c4b83f3f`
-2.  Infinity Portal authenticates user.
-3.  Portal checks DB: "Where is Account `c4b83f3f` hosted?" -> **Answer: Azure**.
-4.  Portal generates "Connection Context" (User/Pass/IP) and saves to Secure DB.
-5.  Portal redirects browser to: `https://windows.cloud.microsoft/webclient/...`
-6.  AVD Session starts -> Helper App pulls context -> Smart Console launches.
-
-## 7. Deep Dive: The "Connection Token" & AppStream URL Analysis
+### 7.2 Deep Dive: The "Connection Token" & AppStream URL Analysis
 
 **New Discovery:**
 *   **Connection Token Format:** `ServiceIdentifier/AccountID/PortalDomain`
@@ -378,7 +397,7 @@ Since AVD Web Client **does not** support a `&context=` parameter in the URL (as
     *   Backend returns the "Connection Token" and credentials.
     *   Helper App launches Smart Console.
 
-## 10. Context Store Technology Selection (Key Vault vs. Redis)
+### 7.3 Context Store Technology Selection (Key Vault vs. Redis)
 
 **Option A: Azure Key Vault**
 *   **Mechanism:**
@@ -401,7 +420,7 @@ Since AVD Web Client **does not** support a `&context=` parameter in the URL (as
 For the **Proof of Concept (PoC)**, Key Vault is fine and easy to set up.
 For **Production**, we **must use Redis** (or Cosmos DB) to handle the scale of thousands of concurrent users.
 
-## 8. Handling Multi-Tenancy (MSSP Scenario)
+### 7.4 Handling Multi-Tenancy (MSSP Scenario)
 
 **The Challenge:**
 A single user (e.g., `roie@mssp.com`) might have access to **multiple** Management Servers (Customer A, Customer B, Customer C).
@@ -433,7 +452,7 @@ Since we cannot pass the "Target ID" in the URL, we must rely on the **Time-Base
 5.  **Result:**
     *   Smart Console opens for Customer A.
 
-## 11. Context Lifecycle & Concurrency Handling
+### 7.5 Context Lifecycle & Concurrency Handling
 
 **The "Temporary" Nature of the Context:**
 The context stored in the backend (Key Vault/Redis) is **transient**. It exists only to bridge the gap between the user's click in the Portal and the application launch in Azure.
@@ -463,7 +482,7 @@ The context stored in the backend (Key Vault/Redis) is **transient**. It exists 
 *   If Roie clicks "Connect Customer A" and then immediately clicks "Connect Customer B" in another tab *before* the first session starts, the `ActiveLaunch` key might be overwritten.
 *   **Mitigation:** This is a rare race condition. The "Launch" process is usually blocking or modal. The short TTL (Time To Live) ensures that old clicks don't linger.
 
-## 9. Identity Migration (The "Entra ID" Requirement)
+### 7.6 Identity Migration (The "Entra ID" Requirement)
 
 **The Gap:**
 *   **Current State (AWS):** Users authenticate against a custom Identity Provider (IdP) or local DB in Infinity Portal. Their identity is passed to AWS AppStream via the encrypted context.
@@ -499,21 +518,9 @@ Since Infinity Portal owns the "Real" identity, the Azure identities are just "S
     4.  Azure logs Roie in.
 *   **Benefit:** Seamless SSO. No new passwords. No "Guest" invites.
 
-### Challenge 2: Latency
-**The Issue:** The Management Server is in Azure, the Smart Console (AVD) is in Azure, but the User is remote.
-**Solution:** 
-*   Ensure AVD Host Pool and Management VM Farm are in the **same Azure Region** (e.g., East US) to minimize console-to-server latency.
-*   Use **AVD RDP Shortpath** to optimize the UDP connection from the user's home/office to the Azure VDI.
+## 8. PoC Implementation Specifications
 
-### Challenge 3: Automation & Orchestration
-**The Issue:** Creating new Management Servers for new customers automatically.
-**Solution:**
-*   **Terraform** or **Bicep** to define the Management Server VM template.
-*   **Azure Functions** to trigger deployment when a new customer signs up in Infinity Portal.
-
-## 12. PoC Implementation Specifications
-
-### 12.1 Component: Azure Cosmos DB
+### 8.1 Component: Azure Cosmos DB
 *   **Database Name:** `S1C_Migration`
 *   **Container Name:** `ConnectionRequests`
 *   **Partition Key:** `/userId` (Optimizes queries by user)
@@ -532,7 +539,7 @@ Since Infinity Portal owns the "Real" identity, the Azure identities are just "S
 }
 ```
 
-### 12.2 Component: Azure Function (The Broker)
+### 8.2 Component: Azure Function (The Broker)
 *   **Runtime:** Python or C# (Consumption Plan is fine).
 *   **Function 1: `QueueConnection` (POST)**
     *   **Input:** JSON body (same as schema above).
@@ -540,7 +547,7 @@ Since Infinity Portal owns the "Real" identity, the Azure identities are just "S
 *   **Function 2: `FetchConnection` (GET)**
     *   **Input:** Query param `?userId=roie@mssp.com`.
 
-### 12.3 Component: PowerShell Launcher (The Client)
+### 8.3 Component: PowerShell Launcher (The Client)
 *   **Location:** Runs inside the AVD Session (User Context).
 *   **Logic Flow:**
     ```powershell
