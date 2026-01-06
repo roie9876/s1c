@@ -30,6 +30,38 @@
         <h1>Infinity Portal Simulator</h1>
         <p>This local app simulates the <b>Infinity Portal</b>. Clicking "Connect" sends a request to the <b>Real Azure Function</b>.</p>
 
+        <div class="card">
+            {% if current_user %}
+                <b>Signed in as:</b> {{ current_user.name }} ({{ current_user.portalUser or current_user.userId }})
+                {% if mapped_avd_user %}
+                    <br />
+                    <b>Queues as AVD user:</b> {{ mapped_avd_user }}
+                {% endif %}
+                <hr />
+                <form action="/set_context" method="POST" style="margin:0; display:inline-block; width: 75%;">
+                    <label for="APPSTREAM_SESSION_CONTEXT"><b>APPSTREAM_SESSION_CONTEXT</b></label>
+                    <input
+                        id="APPSTREAM_SESSION_CONTEXT"
+                        name="APPSTREAM_SESSION_CONTEXT"
+                        type="text"
+                        value="{{ appstream_session_context or '' }}"
+                        style="width: 65%; padding: 6px 10px; margin-left: 10px;"
+                        placeholder="Enter session context"
+                        required
+                    />
+                    <button type="submit" class="btn" style="margin-left: 10px;">Save</button>
+                </form>
+                <form action="/logout" method="GET" style="display:inline; float:right;">
+                    <button type="submit" class="btn refresh-btn">Logout</button>
+                </form>
+            {% else %}
+                <b>Not signed in.</b>
+                <form action="/login" method="GET" style="display:inline; float:right;">
+                    <button type="submit" class="btn">Login</button>
+                </form>
+            {% endif %}
+        </div>
+
         <!-- FLASH MESSAGES -->
         {% with messages = get_flashed_messages(with_categories=true) %}
           {% if messages %}

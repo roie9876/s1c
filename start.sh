@@ -27,8 +27,36 @@ fi
 # shellcheck disable=SC1091
 source "$VENV_DIR/bin/activate"
 
+VENV_PY="$VENV_DIR/bin/python"
+VENV_PIP="$VENV_DIR/bin/pip"
+
+if [[ ! -x "$VENV_PY" ]]; then
+  echo "ERROR: venv python not found at: $VENV_PY" >&2
+  exit 1
+fi
+
 echo "Installing requirements from $REQ_FILE"
-python -m pip install -r "$REQ_FILE" >/dev/null
+"$VENV_PY" -m pip install -U pip
+"$VENV_PY" -m pip install -r "$REQ_FILE"
+
+# Friendly config warning for the OIDC PoC.
+ENV_FILE="$PORTAL_DIR/.env"
+if [[ -f "$ENV_FILE" ]]; then
+  # shellcheck disable=SC1090
+  set +u
+  source "$ENV_FILE"
+  set -u
+fi
+
+if [[ -z "${KEYCLOAK_CLIENT_ID:-}" || -z "${KEYCLOAK_CLIENT_SECRET:-}" ]]; then
+  echo "" >&2
+  echo "WARNING: Keycloak OIDC not configured yet." >&2
+  echo "- Set KEYCLOAK_CLIENT_ID and KEYCLOAK_CLIENT_SECRET in: $ENV_FILE" >&2
+  echo "- Realm: master (PoC)" >&2
+  echo "- Redirect URI must include: http://localhost:5001/auth/callback" >&2
+  echo "Without this, /login will return HTTP 500." >&2
+  echo "" >&2
+fi
 
 echo "Starting Local Portal on http://127.0.0.1:5001"
-python "$APP_FILE"
+"$VENV_PY" "$APP_FILE"

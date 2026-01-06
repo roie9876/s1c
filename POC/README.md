@@ -42,7 +42,9 @@ A Python Flask web application that simulates both the Infinity Portal UI and th
     ```
     Then open `http://localhost:5001` in your browser.
 
-**User mapping (PoC):** the portal simulator can queue requests under a specific AVD Entra UPN using the `avdUserId` field in `CUSTOMERS`.
+**Portal authentication (PoC):** the portal requires Keycloak OIDC login.
+
+**User mapping (PoC):** requests are queued under the logged-in user identity (derived from Keycloak claims like `email` / `upn`). For the end-to-end flow to work, this value must match the AVD session user returned by `whoami /upn`.
 
 Optional (for demo): You can set `AVD_LAUNCH_URL` for the portal so clicking **Connect** redirects the browser to AVD Web.
 

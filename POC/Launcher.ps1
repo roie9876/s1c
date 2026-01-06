@@ -41,7 +41,9 @@ param(
     [string]$EnvUserVar = "S1C_USERNAME",
     [string]$EnvIpVar = "S1C_TARGET_IP",
     [string]$EnvPassVar = "S1C_PASSWORD",
+    [string]$EnvAppStreamCtxVar = "APPSTREAM_SESSION_CONTEXT",
     [switch]$PersistUserEnv,
+    [switch]$PersistMachineEnv,
     [switch]$ShowPassword,
     [int]$PollSeconds = 60,
     [int]$PollIntervalSeconds = 3,
@@ -106,6 +108,13 @@ function Set-Env([string]$Name, [string]$Value) {
             [Environment]::SetEnvironmentVariable($Name, $Value, "User")
         } catch {
             Write-Host "[WARN] Failed to persist env var '$Name' at User scope: $($_.Exception.Message)" -ForegroundColor Yellow
+        }
+    }
+    if ($PersistMachineEnv) {
+        try {
+            [Environment]::SetEnvironmentVariable($Name, $Value, "Machine")
+        } catch {
+            Write-Host "[WARN] Failed to persist env var '$Name' at Machine scope (requires admin): $($_.Exception.Message)" -ForegroundColor Yellow
         }
     }
 }
@@ -193,6 +202,8 @@ try {
     $Username = [string]$Response.username
     $Password = ""
     if ($null -ne $Response.password) { $Password = [string]$Response.password }
+    $AppStreamCtx = ""
+    if ($null -ne $Response.appstreamSessionContext) { $AppStreamCtx = [string]$Response.appstreamSessionContext }
 
     Write-Host "[SUCCESS] Connection request found." -ForegroundColor Green
     Write-Log "Connection request found"
@@ -201,12 +212,14 @@ try {
     Set-Env -Name $EnvUserVar -Value $Username
     Set-Env -Name $EnvIpVar -Value $TargetIp
     Set-Env -Name $EnvPassVar -Value $Password
-    Write-Log ("Set env vars: " + $EnvUserVar + "," + $EnvIpVar + "," + $EnvPassVar)
+    Set-Env -Name $EnvAppStreamCtxVar -Value $AppStreamCtx
+    Write-Log ("Set env vars: " + $EnvUserVar + "," + $EnvIpVar + "," + $EnvPassVar + "," + $EnvAppStreamCtxVar)
 
     # 4) Display values FROM env vars
     $EnvUser = Get-Env -Name $EnvUserVar
     $EnvIp = Get-Env -Name $EnvIpVar
     $EnvPass = Get-Env -Name $EnvPassVar
+    $EnvCtx = Get-Env -Name $EnvAppStreamCtxVar
 
     Write-Host "[INFO] Environment variables set:" -ForegroundColor Cyan
     Write-Host "  $EnvUserVar=$EnvUser"
@@ -215,6 +228,13 @@ try {
         Write-Host "  $EnvPassVar=$EnvPass" -ForegroundColor Yellow
     } else {
         Write-Host "  $EnvPassVar=$(Mask-Secret $EnvPass) (masked)" -ForegroundColor DarkGray
+    }
+
+    # Context may be sensitive; keep it masked unless ShowPassword is set.
+    if ($ShowPassword) {
+        Write-Host "  $EnvAppStreamCtxVar=$EnvCtx" -ForegroundColor Yellow
+    } else {
+        Write-Host "  $EnvAppStreamCtxVar=$(Mask-Secret $EnvCtx) (masked)" -ForegroundColor DarkGray
     }
 
     # 5) Launch SmartConsole with NO args (no injection)

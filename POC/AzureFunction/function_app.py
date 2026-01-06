@@ -51,6 +51,7 @@ def queue_connection(req: func.HttpRequest) -> func.HttpResponse:
         "targetIp": req_body.get("targetIp"),
         "username": req_body.get("username"),
         "password": req_body.get("password"),
+        "appstreamSessionContext": req_body.get("appstreamSessionContext"),
         "status": "PENDING",
         # Short-lived TTL (seconds). Container must have TTL enabled.
         "ttl": 60,
@@ -100,6 +101,7 @@ def fetch_connection(req: func.HttpRequest) -> func.HttpResponse:
             "targetIp": item.get("targetIp"),
             "username": item.get("username"),
             "password": item.get("password"),
+            "appstreamSessionContext": item.get("appstreamSessionContext"),
         }
 
         return func.HttpResponse(
