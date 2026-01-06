@@ -82,14 +82,18 @@ Broadcast-EnvChange
 Set-Content -Path $ScriptPath -Value $script -Encoding UTF8 -Force
 
 # Create/replace the scheduled task
-$escapedScriptPath = $ScriptPath.Replace('"', '""')
-$action = "powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"$escapedScriptPath\""
+$action = "powershell.exe -NoProfile -ExecutionPolicy Bypass -File `"$ScriptPath`""
+
+# schtasks /Create /SC ONCE requires a valid start time; pick the next minute.
+$start = (Get-Date).AddMinutes(1)
+$st = $start.ToString('HH:mm')
 
 # Delete if exists (ignore failures)
 & schtasks.exe /Delete /TN $TaskName /F 2>$null | Out-Null
 
-& schtasks.exe /Create /TN $TaskName /SC ONCE /ST 00:00 /RL HIGHEST /RU SYSTEM /TR $action /F | Out-Null
+& schtasks.exe /Create /TN $TaskName /SC ONCE /ST $st /RL HIGHEST /RU SYSTEM /TR $action /F | Out-Null
 
 # ONCE schedule is required by schtasks, but we only ever /Run it on demand.
 Write-Host "[OK] Installed Scheduled Task '$TaskName' and script at '$ScriptPath'." -ForegroundColor Green
 Write-Host "      Launcher will write requests to: $RequestPath" -ForegroundColor DarkGray
+Write-Host "      Verify: schtasks /Query /TN $TaskName" -ForegroundColor DarkGray

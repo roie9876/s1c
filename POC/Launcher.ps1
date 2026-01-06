@@ -155,7 +155,11 @@ function Try-SetMachineEnvViaScheduledTask([string]$Name, [string]$Value) {
         Set-Content -Path $MachineEnvRequestPath -Value $payload -Encoding UTF8 -Force
 
         # Trigger SYSTEM task to apply env var.
-        $null = & schtasks.exe /Run /TN $MachineEnvTaskName 2>$null
+        $runOut = & schtasks.exe /Run /TN $MachineEnvTaskName 2>&1
+        if ($LASTEXITCODE -ne 0) {
+            Write-Log ("WARN: schtasks /Run failed for '" + $MachineEnvTaskName + "': " + ($runOut | Out-String).Trim())
+            return $false
+        }
         Start-Sleep -Milliseconds 750
         return $true
     } catch {
@@ -184,6 +188,11 @@ function Set-Env([string]$Name, [string]$Value, [switch]$MachineOnly) {
             $usedTask = $false
             if ($Name -eq $EnvAppStreamCtxVar -or $MachineOnly) {
                 $usedTask = Try-SetMachineEnvViaScheduledTask -Name $Name -Value $Value
+            }
+            if ($usedTask) {
+                $msg = "Used Scheduled Task '$MachineEnvTaskName' to set Machine env var '$Name'."
+                Write-Host "[INFO] $msg" -ForegroundColor DarkGray
+                Write-Log $msg
             }
             if (-not $usedTask) {
                 if (-not $WarnedMachineEnv) {
