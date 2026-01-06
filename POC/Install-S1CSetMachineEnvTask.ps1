@@ -74,6 +74,7 @@ if (-not \$raw) { exit 0 }
 \$name = [string]\$obj.name
 \$value = [string]\$obj.value
 if ([string]::IsNullOrWhiteSpace(\$name)) { exit 0 }
+if ([string]::IsNullOrWhiteSpace(\$value)) { exit 0 }
 
 [Environment]::SetEnvironmentVariable(\$name, \$value, 'Machine')
 Broadcast-EnvChange
@@ -84,7 +85,7 @@ Set-Content -Path $ScriptPath -Value $script -Encoding UTF8 -Force
 # Create/replace the scheduled task
 $action = "powershell.exe -NoProfile -ExecutionPolicy Bypass -File `"$ScriptPath`""
 
-# schtasks /Create /SC ONCE requires a valid start time; pick the next minute.
+# schtasks needs a valid start time; pick the next minute.
 $start = (Get-Date).AddMinutes(1)
 $st = $start.ToString('HH:mm')
 
@@ -97,9 +98,9 @@ try {
   $ErrorActionPreference = $prevErrPref
 }
 
-& schtasks.exe /Create /TN $TaskName /SC ONCE /ST $st /RL HIGHEST /RU SYSTEM /TR $action /F | Out-Null
+& schtasks.exe /Create /TN $TaskName /SC MINUTE /MO 1 /ST $st /RL HIGHEST /RU SYSTEM /TR $action /F | Out-Null
 
-# ONCE schedule is required by schtasks, but we only ever /Run it on demand.
+# Runs every minute as SYSTEM and applies the most recent request file.
 Write-Host "[OK] Installed Scheduled Task '$TaskName' and script at '$ScriptPath'." -ForegroundColor Green
 Write-Host "      Launcher will write requests to: $RequestPath" -ForegroundColor DarkGray
 Write-Host "      Verify: schtasks /Query /TN $TaskName" -ForegroundColor DarkGray

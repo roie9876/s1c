@@ -151,16 +151,17 @@ function Try-SetMachineEnvViaScheduledTask([string]$Name, [string]$Value) {
         $dir = Split-Path -Parent $MachineEnvRequestPath
         if (-not (Test-Path $dir)) { New-Item -Path $dir -ItemType Directory -Force | Out-Null }
 
+        if ([string]::IsNullOrWhiteSpace($Value)) { return $false }
         $payload = @{ name = $Name; value = $Value } | ConvertTo-Json -Compress
         Set-Content -Path $MachineEnvRequestPath -Value $payload -Encoding UTF8 -Force
 
-        # Trigger SYSTEM task to apply env var.
+        # Prefer a minute-based SYSTEM task (no need to trigger it from this user context).
+        # If schtasks /Run works, we use it to apply faster; otherwise, the next scheduled run will apply.
         $runOut = & schtasks.exe /Run /TN $MachineEnvTaskName 2>&1
         if ($LASTEXITCODE -ne 0) {
-            Write-Log ("WARN: schtasks /Run failed for '" + $MachineEnvTaskName + "': " + ($runOut | Out-String).Trim())
-            return $false
+            Write-Log ("INFO: Wrote machine env request file; schtasks /Run not permitted or failed for '" + $MachineEnvTaskName + "': " + ($runOut | Out-String).Trim())
         }
-        Start-Sleep -Milliseconds 750
+        Start-Sleep -Milliseconds 300
         return $true
     } catch {
         return $false
