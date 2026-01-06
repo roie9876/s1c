@@ -74,8 +74,8 @@ Notes:
 - `APPSTREAM_SESSION_CONTEXT` is entered in the Portal UI (per logged-in portal user session) and is passed through the broker payload.
 - Credentials are set for the current process (so SmartConsole inherits them). You can also persist credentials to *User* scope using `-PersistUserEnv`.
 - `APPSTREAM_SESSION_CONTEXT` is set for the current process (so SmartConsole inherits it).
+- By default, `APPSTREAM_SESSION_CONTEXT` is also persisted **per-user** (HKCU) so each concurrent user can have a different value.
 - By default, `APPSTREAM_SESSION_CONTEXT` is **not** persisted to *Machine/System* env vars, to avoid multiple concurrent users overwriting each other on the same AVD session host.
-- If you want it persisted per-user (visible under “User variables for <user>”), run the launcher with `-PersistUserEnv`.
 - If you explicitly want a host-wide System variable (shared by all users), run with `-PersistContextMachineEnv:$true` (requires admin rights, or a SYSTEM scheduled task).
 
 If the launcher is not running as admin:
@@ -118,7 +118,7 @@ Recommended behavior for multi-user AVD hosts is **per-process** (always) and op
 3. Verify as the same AVD user (cp1/cp2) in their session:
     - Process (what SmartConsole inherits):
         - `powershell -NoProfile -Command "[Environment]::GetEnvironmentVariable('APPSTREAM_SESSION_CONTEXT','Process')"`
-    - User scope (only if you ran the launcher with `-PersistUserEnv`):
+    - User scope (default for context):
         - `powershell -NoProfile -Command "[Environment]::GetEnvironmentVariable('APPSTREAM_SESSION_CONTEXT','User')"`
 
 4. Why localadmin doesn’t see it (and how to inspect anyway):

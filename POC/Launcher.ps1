@@ -43,6 +43,9 @@ param(
     [string]$EnvPassVar = "S1C_PASSWORD",
     [string]$EnvAppStreamCtxVar = "APPSTREAM_SESSION_CONTEXT",
     [switch]$PersistUserEnv,
+    # Default: persist APPSTREAM_SESSION_CONTEXT at User scope (HKCU) so each user gets
+    # their own value on multi-session hosts, without persisting credentials.
+    [bool]$PersistContextUserEnv = $true,
     [switch]$PersistMachineEnv,
     # Default: DO NOT persist APPSTREAM_SESSION_CONTEXT at Machine scope.
     # Reason: Multi-session hosts can have multiple concurrent users, and a Machine/System
@@ -180,7 +183,9 @@ $WarnedMachineEnv = $false
 function Set-Env([string]$Name, [string]$Value, [switch]$MachineOnly) {
     if ([string]::IsNullOrWhiteSpace($Name)) { return }
     Set-Item -Path ("Env:" + $Name) -Value $Value
-    if ($PersistUserEnv -and -not $MachineOnly) {
+
+    $shouldPersistUser = ($PersistUserEnv -and -not $MachineOnly) -or ($PersistContextUserEnv -and -not $MachineOnly -and $Name -eq $EnvAppStreamCtxVar)
+    if ($shouldPersistUser) {
         try {
             [Environment]::SetEnvironmentVariable($Name, $Value, "User")
         } catch {
