@@ -53,17 +53,21 @@ try {
   Write-Host "[WARN] Failed to set ACLs on request folder: $($_.Exception.Message)" -ForegroundColor Yellow
 }
 
-$script = @"
-param(
-  [string]\$RequestPath = '$RequestPath',
-  [string]\$LogPath = '$LogPath'
-)
-\$ErrorActionPreference = 'Stop'
+$reqEsc = $RequestPath.Replace("'", "''")
+$logEsc = $LogPath.Replace("'", "''")
 
-function Log([string]\$Message) {
+$script = @'
+param(
+  [string]$RequestPath = '%%REQUEST_PATH%%',
+  [string]$LogPath = '%%LOG_PATH%%'
+)
+
+$ErrorActionPreference = 'Stop'
+
+function Log([string]$Message) {
   try {
-    \$ts = (Get-Date).ToString('s')
-    Add-Content -Path \$LogPath -Value ("[\$ts] " + \$Message) -ErrorAction SilentlyContinue
+    $ts = (Get-Date).ToString('s')
+    Add-Content -Path $LogPath -Value ("[$ts] " + $Message) -ErrorAction SilentlyContinue
   } catch { }
 }
 
@@ -77,50 +81,52 @@ public static class NativeMethods {
   public static extern IntPtr SendMessageTimeout(IntPtr hWnd, int Msg, IntPtr wParam, string lParam, int fuFlags, int uTimeout, out IntPtr lpdwResult);
 }
 '@ -ErrorAction SilentlyContinue | Out-Null
-    \$HWND_BROADCAST = [IntPtr]0xFFFF
-    \$WM_SETTINGCHANGE = 0x001A
-    \$SMTO_ABORTIFHUNG = 0x0002
-    \$result = [IntPtr]::Zero
-    [NativeMethods]::SendMessageTimeout(\$HWND_BROADCAST, \$WM_SETTINGCHANGE, [IntPtr]::Zero, "Environment", \$SMTO_ABORTIFHUNG, 2000, [ref]\$result) | Out-Null
+    $HWND_BROADCAST = [IntPtr]0xFFFF
+    $WM_SETTINGCHANGE = 0x001A
+    $SMTO_ABORTIFHUNG = 0x0002
+    $result = [IntPtr]::Zero
+    [NativeMethods]::SendMessageTimeout($HWND_BROADCAST, $WM_SETTINGCHANGE, [IntPtr]::Zero, "Environment", $SMTO_ABORTIFHUNG, 2000, [ref]$result) | Out-Null
   } catch { }
 }
 
 try {
-  Log ("Run started. RequestPath=" + \$RequestPath)
+  Log ("Run started. RequestPath=" + $RequestPath)
 
-  if (-not (Test-Path \$RequestPath)) {
-    Log ("Skip: request file not found")
+  if (-not (Test-Path $RequestPath)) {
+    Log "Skip: request file not found"
     exit 0
   }
 
-  \$raw = Get-Content -Path \$RequestPath -Raw -ErrorAction Stop
-  if (-not \$raw) {
-    Log ("Skip: request file empty")
+  $raw = Get-Content -Path $RequestPath -Raw -ErrorAction Stop
+  if (-not $raw) {
+    Log "Skip: request file empty"
     exit 0
   }
 
-  \$obj = \$raw | ConvertFrom-Json
-  \$name = [string]\$obj.name
-  \$value = [string]\$obj.value
-  if ([string]::IsNullOrWhiteSpace(\$name)) {
-    Log ("Skip: name is empty")
+  $obj = $raw | ConvertFrom-Json
+  $name = [string]$obj.name
+  $value = [string]$obj.value
+  if ([string]::IsNullOrWhiteSpace($name)) {
+    Log "Skip: name is empty"
     exit 0
   }
-  if ([string]::IsNullOrWhiteSpace(\$value)) {
-    Log ("Skip: value is empty")
+  if ([string]::IsNullOrWhiteSpace($value)) {
+    Log "Skip: value is empty"
     exit 0
   }
 
-  [Environment]::SetEnvironmentVariable(\$name, \$value, 'Machine')
+  [Environment]::SetEnvironmentVariable($name, $value, 'Machine')
   Broadcast-EnvChange
-  Log ("OK: Set Machine env var '" + \$name + "' to '" + \$value + "'.")
+  Log ("OK: Set Machine env var '" + $name + "' to '" + $value + "'.")
   exit 0
 }
 catch {
-  Log ("ERROR: " + \$_.Exception.Message)
+  Log ("ERROR: " + $_.Exception.Message)
   exit 1
 }
-"@
+'@
+
+$script = $script.Replace('%%REQUEST_PATH%%', $reqEsc).Replace('%%LOG_PATH%%', $logEsc)
 
 Set-Content -Path $ScriptPath -Value $script -Encoding UTF8 -Force
 

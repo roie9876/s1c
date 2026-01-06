@@ -44,9 +44,11 @@ param(
     [string]$EnvAppStreamCtxVar = "APPSTREAM_SESSION_CONTEXT",
     [switch]$PersistUserEnv,
     [switch]$PersistMachineEnv,
-    # Default: persist only APPSTREAM_SESSION_CONTEXT at Machine scope (System env vars)
-    # so it shows up in the Windows "System variables" UI. Requires admin.
-    [bool]$PersistContextMachineEnv = $true,
+    # Default: DO NOT persist APPSTREAM_SESSION_CONTEXT at Machine scope.
+    # Reason: Multi-session hosts can have multiple concurrent users, and a Machine/System
+    # env var would be shared and would cause users to overwrite each other.
+    # If you explicitly want a System variable (global), set -PersistContextMachineEnv:$true.
+    [bool]$PersistContextMachineEnv = $false,
     # If the launcher is not running elevated, it cannot write Machine env vars directly.
     # This optional fallback uses a pre-created Scheduled Task that runs as SYSTEM.
     [bool]$UseScheduledTaskForMachineEnv = $true,

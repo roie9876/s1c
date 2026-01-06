@@ -73,8 +73,10 @@ Behavior:
 Notes:
 - `APPSTREAM_SESSION_CONTEXT` is entered in the Portal UI (per logged-in portal user session) and is passed through the broker payload.
 - Credentials are set for the current process (so SmartConsole inherits them). You can also persist credentials to *User* scope using `-PersistUserEnv`.
-- `APPSTREAM_SESSION_CONTEXT` is persisted to *Machine/System* environment variables by default (so it shows under Windows "System variables"); this requires admin rights.
-- You can disable Machine persistence for the context with `-PersistContextMachineEnv:$false`.
+- `APPSTREAM_SESSION_CONTEXT` is set for the current process (so SmartConsole inherits it).
+- By default, `APPSTREAM_SESSION_CONTEXT` is **not** persisted to *Machine/System* env vars, to avoid multiple concurrent users overwriting each other on the same AVD session host.
+- If you want it persisted per-user (visible under “User variables for <user>”), run the launcher with `-PersistUserEnv`.
+- If you explicitly want a host-wide System variable (shared by all users), run with `-PersistContextMachineEnv:$true` (requires admin rights, or a SYSTEM scheduled task).
 
 If the launcher is not running as admin:
 - The launcher cannot directly write Machine/System env vars.
@@ -101,9 +103,9 @@ Quick validation (after queueing a request):
 - `curl "https://s1c-function-11729.azurewebsites.net/api/fetch_connection?userId=cp1%40mydemodomain.org"`
 - The JSON response should include `appstreamSessionContext`.
 
-## End-to-End: APPSTREAM_SESSION_CONTEXT to Windows System Env
+## Verifying APPSTREAM_SESSION_CONTEXT (Per-User vs System)
 
-This is the verified working flow to push a portal-provided context string into Windows *System* environment variables.
+Recommended behavior for multi-user AVD hosts is **per-process** (always) and optionally **per-user** (with `-PersistUserEnv`).
 
 1. Portal:
     - Login
@@ -113,20 +115,26 @@ This is the verified working flow to push a portal-provided context string into 
 2. Broker:
     - Ensure the Azure Function is redeployed so `fetch_connection` returns `appstreamSessionContext`.
 
-3. AVD Session Host setup (one time, as Administrator):
-    - Copy these files to the session host (example: `C:\S1C\`):
-        - `Launcher.ps1`
-        - `Install-S1CSetMachineEnvTask.ps1`
-    - Install the SYSTEM task:
+3. Verify as the same AVD user (cp1/cp2) in their session:
+    - Process (what SmartConsole inherits):
+        - `powershell -NoProfile -Command "[Environment]::GetEnvironmentVariable('APPSTREAM_SESSION_CONTEXT','Process')"`
+    - User scope (only if you ran the launcher with `-PersistUserEnv`):
+        - `powershell -NoProfile -Command "[Environment]::GetEnvironmentVariable('APPSTREAM_SESSION_CONTEXT','User')"`
+
+4. Why localadmin doesn’t see it (and how to inspect anyway):
+    - User-scoped env vars are stored under that user’s registry hive (HKCU). When you RDP as `localadmin`, HKCU is **localadmin’s** hive, not cp1’s.
+    - If cp1 is currently logged on (so the hive is loaded), localadmin can inspect it via HKU + the user SID:
+        - Find logged-on profiles/SIDs:
+            - `powershell -NoProfile -Command "Get-CimInstance Win32_UserProfile | Select-Object LocalPath,SID"`
+        - Then read the env var from HKU:
+            - `reg query "HKU\<SID>\Environment" /v APPSTREAM_SESSION_CONTEXT`
+
+Optional: System-wide (shared) persistence
+- If you explicitly want a System variable (shared by all users), you can enable Machine persistence:
+    - Run the launcher with `-PersistContextMachineEnv:$true`.
+    - If the launcher is not running as admin, install the SYSTEM Scheduled Task once (run on the AVD session host as Administrator):
         - `powershell.exe -NoProfile -ExecutionPolicy Bypass -File C:\S1C\Install-S1CSetMachineEnvTask.ps1`
-
-4. AVD user run:
-    - Run the RemoteApp launcher (PowerShell that runs `Launcher.ps1`).
-    - The launcher writes the request file: `C:\ProgramData\S1C\machine-env-request.json`.
-    - Within ~1 minute, the SYSTEM task applies `APPSTREAM_SESSION_CONTEXT` as a Machine/System env var.
-
-5. Verify on the session host:
-    - `powershell -NoProfile -Command "[Environment]::GetEnvironmentVariable('APPSTREAM_SESSION_CONTEXT','Machine')"`
+      The task runs as SYSTEM and applies the latest request file every minute.
 
 Troubleshooting tip:
 - If the launcher log still shows the old warning about not having admin rights and never writes `C:\\ProgramData\\S1C\\machine-env-request.json`, you are likely running an older `C:\\SC1\\Launcher.ps1`.
