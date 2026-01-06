@@ -14,6 +14,24 @@ This document outlines the architecture and migration strategy for moving the Ch
 
 ## 2. Current Architecture (AWS)
 
+### 2.3 Authentication & Access Brokering (Infinity Portal + AWS AppStream)
+
+**Infinity Portal authentication (current):**
+- The portal authentication flow is vendor-managed and session-based.
+- In the captured login HAR, authentication is initiated via a Check Point CloudInfra gateway endpoint under the portal domain (SAML-oriented), for example:
+    - `https://cloudinfra-gw.portal.checkpoint.com/api/v1/ci-saml/authenticate` (with additional query parameters such as realm/sourceProductId).
+- The result is an authenticated browser session (cookies on `*.checkpoint.com` / `*.portal.checkpoint.com`). After the session is established, subsequent portal actions rely on the session rather than repeatedly collecting credentials.
+- Unless explicit federation is configured, there is no evidence in the default flow that an external IdP (for example AWS Cognito or Microsoft Entra ID) is participating.
+
+**Smart-1 Cloud launch via AppStream (current):**
+- The Infinity Portal acts as an access broker; the user does not authenticate to AWS directly.
+- Clicking the Smart-1 Cloud tile triggers a browser call to a Check Point backend API authorized by the existing Infinity session, for example:
+    - `https://cloudinfra-gw-us.portal.checkpoint.com/app/maas/api/v1/tenant/<tenant-guid>/appstream` (HTTP 200).
+- The response contains a short-lived, service-generated AppStream authentication URL, for example:
+    - `https://appstream2.us-east-1.aws.amazon.com/authenticate?parameters=<...>&signature=<...>`
+- This indicates a delegated brokered launch: Check Point (server-side) uses its AWS trust/permissions to mint a signed one-time AppStream launch token; AppStream validates the token and starts the streaming session.
+
+
 ### Components
 1.  **Infinity Portal (AWS)**
     *   **Role:** User registration, authentication, and account management.
@@ -247,6 +265,20 @@ flowchart TD
 *   **Federation (Recommended):** Configure Federation (SAML/OIDC) between the Infinity Portal IdP and the Azure Entra ID tenant. This ensures that when a user logs into AVD, they are recognized as the *same identity* that initiated the request in the portal.
 *   **B2B Guest Users:** Alternatively, provision Infinity Portal users as B2B Guest users in the Azure tenant.
 *   **Mapping:** The "Connection Request" must be tagged with the **Entra ID UPN** of the user. If the Portal knows the user as `roie`, but Entra knows them as `roie_gmail.com#EXT#@...`, the Portal must write the request using the Entra UPN so the Launcher can find it.
+
+**Why AppStream-style brokering does not translate to AVD RemoteApp:**
+- With AppStream, the portal can redirect the browser to an AWS `.../authenticate?...&signature=...` URL that AWS accepts without the user logging into AWS.
+- With AVD RemoteApp, there is no supported equivalent where a third-party portal can mint a signed one-time login URL/token that bypasses user authentication.
+- AVD access is brokered using Microsoft Entra ID authentication and Entra-issued tokens; user sign-in and Conditional Access are enforced by Entra.
+
+**Implication (SSO requirement):**
+- To achieve a “click in Infinity Portal -> RemoteApp launches with no extra login prompts”, Microsoft Entra ID must be the shared identity authority for both the portal and AVD.
+- Practically this means:
+    - Federate the Infinity Portal to Microsoft Entra ID (Infinity acts as Service Provider; Entra acts as Identity Provider).
+    - Ensure consistent identity mapping (typically UPN/email) and any required group/role claims.
+    - Configure AVD for Entra-based SSO so an existing Entra browser session can be reused silently.
+    - Launch the RemoteApp using AVD-supported deep links / launch URLs.
+    - Expect Conditional Access to influence whether the user is prompted again (MFA, device compliance, sign-in frequency, etc.).
 
 ### Challenge 2: Passing Credentials to RemoteApp
 **Problem:** How to inject retrieved credentials into the Smart Console application?
