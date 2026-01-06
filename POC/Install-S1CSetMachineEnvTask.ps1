@@ -89,7 +89,13 @@ $start = (Get-Date).AddMinutes(1)
 $st = $start.ToString('HH:mm')
 
 # Delete if exists (ignore failures)
-& schtasks.exe /Delete /TN $TaskName /F 2>$null | Out-Null
+$prevErrPref = $ErrorActionPreference
+try {
+  $ErrorActionPreference = 'SilentlyContinue'
+  & schtasks.exe /Delete /TN $TaskName /F 2>$null | Out-Null
+} finally {
+  $ErrorActionPreference = $prevErrPref
+}
 
 & schtasks.exe /Create /TN $TaskName /SC ONCE /ST $st /RL HIGHEST /RU SYSTEM /TR $action /F | Out-Null
 
