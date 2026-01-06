@@ -59,6 +59,8 @@ param(
     [switch]$ShowDialog
 )
 
+$ScriptVersion = "2026-01-06"  # bump when Launcher behavior changes
+
 $ErrorActionPreference = "Stop"
 
 $logDir = Join-Path $env:TEMP "s1c-launcher"
@@ -226,9 +228,23 @@ function Get-Env([string]$Name) {
 
 try {
     Write-Log "Launcher started"
+    $scriptPath = $PSCommandPath
+    if (-not $scriptPath) { try { $scriptPath = $MyInvocation.MyCommand.Path } catch {} }
+    if (-not $scriptPath) { $scriptPath = "(unknown)" }
+
+    Write-Host "[INFO] Launcher version: $ScriptVersion" -ForegroundColor DarkGray
+    Write-Host "[INFO] Launcher path: $scriptPath" -ForegroundColor DarkGray
+    Write-Log ("LauncherVersion=" + $ScriptVersion)
+    Write-Log ("LauncherPath=" + $scriptPath)
+
     Write-Host "[INFO] Log file: $logPath" -ForegroundColor DarkGray
     try { Write-Log ("whoami_upn=" + (whoami /upn)) } catch {}
     Write-Log ("PSVersion=" + $PSVersionTable.PSVersion)
+
+    Write-Log ("PersistContextMachineEnv=" + $PersistContextMachineEnv)
+    Write-Log ("UseScheduledTaskForMachineEnv=" + $UseScheduledTaskForMachineEnv)
+    Write-Log ("MachineEnvTaskName=" + $MachineEnvTaskName)
+    Write-Log ("MachineEnvRequestPath=" + $MachineEnvRequestPath)
 
     # 1) Identify user
     if ($OverrideUser) {

@@ -59,7 +59,7 @@ This is the intended PoC entry point for Azure Virtual Desktop.
 
 - Publish a RemoteApp for:
     - `C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe`
-    - Command line: `-NoProfile -ExecutionPolicy Bypass -File C:\\S1C\\Launcher.ps1`
+- Command line example (current PoC): `-NoProfile -ExecutionPolicy Bypass -File "C:\\SC1\\Launcher.ps1" -ShowDialog -HoldSeconds 0`
 
 Behavior:
 - Fetches the pending request from `GET /api/fetch_connection?userId=<userId>`
@@ -78,9 +78,59 @@ Notes:
 
 If the launcher is not running as admin:
 - The launcher cannot directly write Machine/System env vars.
-- To still persist `APPSTREAM_SESSION_CONTEXT` as a System variable, install the on-demand SYSTEM Scheduled Task once (run on the AVD session host as Administrator):
+- To still persist `APPSTREAM_SESSION_CONTEXT` as a System variable, install the SYSTEM Scheduled Task once (run on the AVD session host as Administrator):
+    - `powershell.exe -NoProfile -ExecutionPolicy Bypass -File C:\S1C\Install-S1CSetMachineEnvTask.ps1`
+  The task runs as SYSTEM and applies the latest request file every minute.
+
+## Updating the Azure Function (CLI)
+
+When you change broker fields (for example adding `appstreamSessionContext`), you must redeploy the Function App.
+
+From macOS:
+
+1. Install prerequisites (one time):
+    - Azure CLI: `brew install azure-cli`
+    - Azure Functions Core Tools v4: `brew install azure-functions-core-tools@4`
+2. Login:
+    - `az login`
+3. Publish:
+    - `cd POC/AzureFunction`
+    - `func azure functionapp publish s1c-function-11729`
+
+Quick validation (after queueing a request):
+- `curl "https://s1c-function-11729.azurewebsites.net/api/fetch_connection?userId=cp1%40mydemodomain.org"`
+- The JSON response should include `appstreamSessionContext`.
+
+## End-to-End: APPSTREAM_SESSION_CONTEXT to Windows System Env
+
+This is the verified working flow to push a portal-provided context string into Windows *System* environment variables.
+
+1. Portal:
+    - Login
+    - Enter `APPSTREAM_SESSION_CONTEXT` (example: `1234`)
+    - Click **Connect**
+
+2. Broker:
+    - Ensure the Azure Function is redeployed so `fetch_connection` returns `appstreamSessionContext`.
+
+3. AVD Session Host setup (one time, as Administrator):
+    - Copy these files to the session host (example: `C:\S1C\`):
+        - `Launcher.ps1`
+        - `Install-S1CSetMachineEnvTask.ps1`
+    - Install the SYSTEM task:
         - `powershell.exe -NoProfile -ExecutionPolicy Bypass -File C:\S1C\Install-S1CSetMachineEnvTask.ps1`
-    After that, the launcher will trigger the task `S1C-SetMachineEnv` automatically.
+
+4. AVD user run:
+    - Run the RemoteApp launcher (PowerShell that runs `Launcher.ps1`).
+    - The launcher writes the request file: `C:\ProgramData\S1C\machine-env-request.json`.
+    - Within ~1 minute, the SYSTEM task applies `APPSTREAM_SESSION_CONTEXT` as a Machine/System env var.
+
+5. Verify on the session host:
+    - `powershell -NoProfile -Command "[Environment]::GetEnvironmentVariable('APPSTREAM_SESSION_CONTEXT','Machine')"`
+
+Troubleshooting tip:
+- If the launcher log still shows the old warning about not having admin rights and never writes `C:\\ProgramData\\S1C\\machine-env-request.json`, you are likely running an older `C:\\SC1\\Launcher.ps1`.
+- The updated launcher prints and logs `Launcher version:` and `Launcher path:` at startup so you can confirm you copied the right file.
 
 ### Legacy / Deprecated scripts
 
