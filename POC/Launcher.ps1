@@ -42,10 +42,53 @@ param(
     [string]$EnvIpVar = "S1C_TARGET_IP",
     [string]$EnvPassVar = "S1C_PASSWORD",
     [switch]$PersistUserEnv,
-    [switch]$ShowPassword
+    [switch]$ShowPassword,
+    [int]$HoldSeconds = 10,
+    [switch]$ShowDialog
 )
 
 $ErrorActionPreference = "Stop"
+
+$logDir = Join-Path $env:TEMP "s1c-launcher"
+if (-not (Test-Path $logDir)) { New-Item -Path $logDir -ItemType Directory -Force | Out-Null }
+$logPath = Join-Path $logDir "Launcher.log"
+function Write-Log([string]$Message) {
+    $ts = (Get-Date).ToString('s')
+    $line = "[$ts] $Message"
+    try { Add-Content -Path $logPath -Value $line -ErrorAction SilentlyContinue } catch {}
+}
+function Hold-Open([string]$Text) {
+    if ($ShowDialog) {
+        try {
+            Add-Type -AssemblyName PresentationFramework -ErrorAction SilentlyContinue | Out-Null
+            [System.Windows.MessageBox]::Show($Text, "S1C Launcher") | Out-Null
+            return
+        } catch {
+            # ignore and fall back to sleep
+        }
+    }
+    if ($HoldSeconds -gt 0) {
+        Start-Sleep -Seconds $HoldSeconds
+    }
+}
+
+function Try-GetHttpStatusCode($Exception) {
+    try {
+        $resp = $Exception.Response
+        if ($resp -and $resp.StatusCode) {
+            # PS7: HttpResponseMessage
+            if ($resp.StatusCode.value__) { return [int]$resp.StatusCode.value__ }
+            return [int]$resp.StatusCode
+        }
+    } catch {}
+    try {
+        # Windows PowerShell WebException
+        if ($Exception.Exception -and $Exception.Exception.Response -and $Exception.Exception.Response.StatusCode) {
+            return [int]$Exception.Exception.Response.StatusCode
+        }
+    } catch {}
+    return $null
+}
 
 function Mask-Secret([string]$Value) {
     if (-not $Value) { return "" }
@@ -74,77 +117,111 @@ function Get-Env([string]$Name) {
     }
 }
 
-# 1) Identify user
-if ($OverrideUser) {
-    $CurrentUserId = $OverrideUser
-    Write-Host "[INFO] Using overridden userId: $CurrentUserId" -ForegroundColor Yellow
-} else {
-    $CurrentUserId = ""
-    try { $CurrentUserId = (whoami /upn) } catch {}
-    $CurrentUserId = ($CurrentUserId | Out-String).Trim()
-    if (-not $CurrentUserId) { $CurrentUserId = $env:USERNAME }
-    Write-Host "[INFO] Detected userId: $CurrentUserId" -ForegroundColor Cyan
-}
-
-# 2) Fetch pending request
-$EncodedUserId = [Uri]::EscapeDataString($CurrentUserId)
-$FetchUrl = "$ApiBaseUrl/fetch_connection?userId=$EncodedUserId"
-Write-Host "[INFO] Fetching connection: $FetchUrl" -ForegroundColor DarkGray
-
 try {
-    $Response = Invoke-RestMethod -Uri $FetchUrl -Method Get -ErrorAction Stop
-} catch {
-    # Typical PoC case: 404 when no pending item exists.
-    if ($_.Exception.Response -and $_.Exception.Response.StatusCode -eq 404) {
-        Write-Host "[INFO] No pending connection request for userId '$CurrentUserId'." -ForegroundColor Gray
+    Write-Log "Launcher started"
+    try { Write-Log ("whoami_upn=" + (whoami /upn)) } catch {}
+    Write-Log ("PSVersion=" + $PSVersionTable.PSVersion)
+
+    # 1) Identify user
+    if ($OverrideUser) {
+        $CurrentUserId = $OverrideUser
+        Write-Host "[INFO] Using overridden userId: $CurrentUserId" -ForegroundColor Yellow
+        Write-Log "Using overridden userId"
+    } else {
+        $CurrentUserId = ""
+        try { $CurrentUserId = (whoami /upn) } catch {}
+        $CurrentUserId = ($CurrentUserId | Out-String).Trim()
+        if (-not $CurrentUserId) { $CurrentUserId = $env:USERNAME }
+        Write-Host "[INFO] Detected userId: $CurrentUserId" -ForegroundColor Cyan
+        Write-Log ("Detected userId=" + $CurrentUserId)
+    }
+
+    # 2) Fetch pending request
+    $EncodedUserId = [Uri]::EscapeDataString($CurrentUserId)
+    $FetchUrl = "$ApiBaseUrl/fetch_connection?userId=$EncodedUserId"
+    Write-Host "[INFO] Fetching connection..." -ForegroundColor DarkGray
+    Write-Log ("FetchUrl=" + $FetchUrl)
+
+    try {
+        $Response = Invoke-RestMethod -Uri $FetchUrl -Method Get -ErrorAction Stop
+    } catch {
+        $status = Try-GetHttpStatusCode $_
+        if ($status -eq 404) {
+            $msg = "No pending connection request for userId '$CurrentUserId'."
+            Write-Host "[INFO] $msg" -ForegroundColor Gray
+            Write-Log $msg
+            Hold-Open ("$msg`n`nLog: $logPath")
+            exit 0
+        }
+
+        $msg = "Failed calling broker API. status=$status err=$($_.Exception.Message)"
+        Write-Host "[ERROR] $msg" -ForegroundColor Red
+        Write-Log $msg
+        Hold-Open ("$msg`n`nLog: $logPath")
+        exit 1
+    }
+
+    if (-not $Response) {
+        $msg = "No response body from broker."
+        Write-Host "[INFO] $msg" -ForegroundColor Gray
+        Write-Log $msg
+        Hold-Open ("$msg`n`nLog: $logPath")
         exit 0
     }
-    Write-Host "[ERROR] Failed calling broker API: $($_.Exception.Message)" -ForegroundColor Red
-    exit 1
-}
 
-if (-not $Response) {
-    Write-Host "[INFO] No response body from broker." -ForegroundColor Gray
+    $TargetIp = [string]$Response.targetIp
+    $Username = [string]$Response.username
+    $Password = ""
+    if ($null -ne $Response.password) { $Password = [string]$Response.password }
+
+    Write-Host "[SUCCESS] Connection request found." -ForegroundColor Green
+    Write-Log "Connection request found"
+
+    # 3) Write to env vars (SmartConsole reads from env)
+    Set-Env -Name $EnvUserVar -Value $Username
+    Set-Env -Name $EnvIpVar -Value $TargetIp
+    Set-Env -Name $EnvPassVar -Value $Password
+    Write-Log ("Set env vars: " + $EnvUserVar + "," + $EnvIpVar + "," + $EnvPassVar)
+
+    # 4) Display values FROM env vars
+    $EnvUser = Get-Env -Name $EnvUserVar
+    $EnvIp = Get-Env -Name $EnvIpVar
+    $EnvPass = Get-Env -Name $EnvPassVar
+
+    Write-Host "[INFO] Environment variables set:" -ForegroundColor Cyan
+    Write-Host "  $EnvUserVar=$EnvUser"
+    Write-Host "  $EnvIpVar=$EnvIp"
+    if ($ShowPassword) {
+        Write-Host "  $EnvPassVar=$EnvPass" -ForegroundColor Yellow
+    } else {
+        Write-Host "  $EnvPassVar=$(Mask-Secret $EnvPass) (masked)" -ForegroundColor DarkGray
+    }
+
+    # 5) Launch SmartConsole with NO args (no injection)
+    if (-not (Test-Path $SmartConsolePath)) {
+        $msg = "SmartConsole not found at: $SmartConsolePath"
+        Write-Host "[ERROR] $msg" -ForegroundColor Red
+        Write-Log $msg
+        Hold-Open ("$msg`n`nLog: $logPath")
+        exit 1
+    }
+
+    Write-Host "[ACTION] Launching SmartConsole (no args)..." -ForegroundColor Green
+    Write-Log ("Launching SmartConsole: " + $SmartConsolePath)
+    $Process = Start-Process -FilePath $SmartConsolePath -PassThru
+    Write-Host "[INFO] SmartConsole PID: $($Process.Id)" -ForegroundColor DarkGray
+    Write-Log ("SmartConsole pid=" + $Process.Id)
+
+    # Keep RemoteApp alive until SmartConsole exits
+    Wait-Process -Id $Process.Id
+    Write-Host "[INFO] SmartConsole exited." -ForegroundColor Gray
+    Write-Log "SmartConsole exited"
     exit 0
 }
-
-$TargetIp = [string]$Response.targetIp
-$Username = [string]$Response.username
-$Password = ""
-if ($null -ne $Response.password) { $Password = [string]$Response.password }
-
-Write-Host "[SUCCESS] Connection request found." -ForegroundColor Green
-
-# 3) Write to env vars (SmartConsole reads from env)
-Set-Env -Name $EnvUserVar -Value $Username
-Set-Env -Name $EnvIpVar -Value $TargetIp
-Set-Env -Name $EnvPassVar -Value $Password
-
-# 4) Display values FROM env vars
-$EnvUser = Get-Env -Name $EnvUserVar
-$EnvIp = Get-Env -Name $EnvIpVar
-$EnvPass = Get-Env -Name $EnvPassVar
-
-Write-Host "[INFO] Environment variables set:" -ForegroundColor Cyan
-Write-Host "  $EnvUserVar=$EnvUser"
-Write-Host "  $EnvIpVar=$EnvIp"
-if ($ShowPassword) {
-    Write-Host "  $EnvPassVar=$EnvPass" -ForegroundColor Yellow
-} else {
-    Write-Host "  $EnvPassVar=$(Mask-Secret $EnvPass) (masked)" -ForegroundColor DarkGray
-}
-
-# 5) Launch SmartConsole with NO args (no injection)
-if (-not (Test-Path $SmartConsolePath)) {
-    Write-Host "[ERROR] SmartConsole not found at: $SmartConsolePath" -ForegroundColor Red
+catch {
+    $msg = "Unhandled exception: $($_.Exception.Message)"
+    Write-Host "[ERROR] $msg" -ForegroundColor Red
+    Write-Log $msg
+    Hold-Open ("$msg`n`nLog: $logPath")
     exit 1
 }
-
-Write-Host "[ACTION] Launching SmartConsole (no args)..." -ForegroundColor Green
-$Process = Start-Process -FilePath $SmartConsolePath -PassThru
-Write-Host "[INFO] SmartConsole PID: $($Process.Id)" -ForegroundColor DarkGray
-
-# Keep RemoteApp alive until SmartConsole exits
-Wait-Process -Id $Process.Id
-Write-Host "[INFO] SmartConsole exited." -ForegroundColor Gray
-exit 0
