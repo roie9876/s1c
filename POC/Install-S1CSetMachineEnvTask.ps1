@@ -19,7 +19,8 @@
 param(
   [string]$TaskName = "S1C-SetMachineEnv",
   [string]$RequestPath = "$env:ProgramData\S1C\machine-env-request.json",
-  [string]$ScriptPath = "$env:ProgramData\S1C\SetMachineEnvFromFile.ps1"
+  [string]$ScriptPath = "$env:ProgramData\S1C\SetMachineEnvFromFile.ps1",
+  [string]$LogPath = "$env:ProgramData\S1C\SetMachineEnvFromFile.log"
 )
 
 $ErrorActionPreference = 'Stop'
@@ -42,12 +43,29 @@ function Ensure-Dir([string]$Path) {
 Assert-Admin
 Ensure-Dir -Path $RequestPath
 Ensure-Dir -Path $ScriptPath
+Ensure-Dir -Path $LogPath
+
+# Allow non-admin AVD users to write the request file.
+try {
+  $folder = Split-Path -Parent $RequestPath
+  & icacls.exe $folder /grant "Users:(OI)(CI)M" /T /C | Out-Null
+} catch {
+  Write-Host "[WARN] Failed to set ACLs on request folder: $($_.Exception.Message)" -ForegroundColor Yellow
+}
 
 $script = @"
 param(
-  [string]\$RequestPath = '$RequestPath'
+  [string]\$RequestPath = '$RequestPath',
+  [string]\$LogPath = '$LogPath'
 )
 \$ErrorActionPreference = 'Stop'
+
+function Log([string]\$Message) {
+  try {
+    \$ts = (Get-Date).ToString('s')
+    Add-Content -Path \$LogPath -Value ("[\$ts] " + \$Message) -ErrorAction SilentlyContinue
+  } catch { }
+}
 
 function Broadcast-EnvChange {
   try {
@@ -78,6 +96,7 @@ if ([string]::IsNullOrWhiteSpace(\$value)) { exit 0 }
 
 [Environment]::SetEnvironmentVariable(\$name, \$value, 'Machine')
 Broadcast-EnvChange
+Log ("Set Machine env var '" + \$name + "' to '" + \$value + "'.")
 "@
 
 Set-Content -Path $ScriptPath -Value $script -Encoding UTF8 -Force

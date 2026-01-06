@@ -155,7 +155,13 @@ function Try-SetMachineEnvViaScheduledTask([string]$Name, [string]$Value) {
 
         if ([string]::IsNullOrWhiteSpace($Value)) { return $false }
         $payload = @{ name = $Name; value = $Value } | ConvertTo-Json -Compress
-        Set-Content -Path $MachineEnvRequestPath -Value $payload -Encoding UTF8 -Force
+        try {
+            Set-Content -Path $MachineEnvRequestPath -Value $payload -Encoding UTF8 -Force
+        } catch {
+            $err = $_.Exception.Message
+            Write-Log ("WARN: Failed to write MachineEnvRequestPath '" + $MachineEnvRequestPath + "': " + $err)
+            return $false
+        }
 
         # Prefer a minute-based SYSTEM task (no need to trigger it from this user context).
         # If schtasks /Run works, we use it to apply faster; otherwise, the next scheduled run will apply.
@@ -166,6 +172,7 @@ function Try-SetMachineEnvViaScheduledTask([string]$Name, [string]$Value) {
         Start-Sleep -Milliseconds 300
         return $true
     } catch {
+        try { Write-Log ("WARN: Scheduled-task Machine env fallback threw: " + $_.Exception.Message) } catch {}
         return $false
     }
 }
