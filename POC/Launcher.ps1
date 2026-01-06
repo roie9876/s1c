@@ -44,6 +44,9 @@ param(
     [string]$EnvAppStreamCtxVar = "APPSTREAM_SESSION_CONTEXT",
     [switch]$PersistUserEnv,
     [switch]$PersistMachineEnv,
+    # Default: persist only APPSTREAM_SESSION_CONTEXT at Machine scope (System env vars)
+    # so it shows up in the Windows "System variables" UI. Requires admin.
+    [bool]$PersistContextMachineEnv = $true,
     [switch]$ShowPassword,
     [int]$PollSeconds = 60,
     [int]$PollIntervalSeconds = 3,
@@ -100,17 +103,39 @@ function Mask-Secret([string]$Value) {
     return ($Value.Substring(0,2) + "***" + $Value.Substring($Value.Length-2, 2))
 }
 
-function Set-Env([string]$Name, [string]$Value) {
+function Test-IsAdmin {
+    try {
+        $currentIdentity = [Security.Principal.WindowsIdentity]::GetCurrent()
+        $principal = New-Object Security.Principal.WindowsPrincipal($currentIdentity)
+        return $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+    } catch {
+        return $false
+    }
+}
+
+$IsAdmin = Test-IsAdmin
+$WarnedMachineEnv = $false
+
+function Set-Env([string]$Name, [string]$Value, [switch]$MachineOnly) {
     if ([string]::IsNullOrWhiteSpace($Name)) { return }
     Set-Item -Path ("Env:" + $Name) -Value $Value
-    if ($PersistUserEnv) {
+    if ($PersistUserEnv -and -not $MachineOnly) {
         try {
             [Environment]::SetEnvironmentVariable($Name, $Value, "User")
         } catch {
             Write-Host "[WARN] Failed to persist env var '$Name' at User scope: $($_.Exception.Message)" -ForegroundColor Yellow
         }
     }
-    if ($PersistMachineEnv) {
+
+    $shouldPersistMachine = $PersistMachineEnv -or ($PersistContextMachineEnv -and $Name -eq $EnvAppStreamCtxVar) -or $MachineOnly
+    if ($shouldPersistMachine) {
+        if (-not $IsAdmin) {
+            if (-not $WarnedMachineEnv) {
+                Write-Host "[WARN] Cannot persist Machine/System env vars without admin rights. 'APPSTREAM_SESSION_CONTEXT' will be process-only (and User-only if -PersistUserEnv is used)." -ForegroundColor Yellow
+                $WarnedMachineEnv = $true
+            }
+            return
+        }
         try {
             [Environment]::SetEnvironmentVariable($Name, $Value, "Machine")
         } catch {
@@ -209,10 +234,13 @@ try {
     Write-Log "Connection request found"
 
     # 3) Write to env vars (SmartConsole reads from env)
+    # Credentials are set for the process only (and optionally User scope if -PersistUserEnv).
     Set-Env -Name $EnvUserVar -Value $Username
     Set-Env -Name $EnvIpVar -Value $TargetIp
     Set-Env -Name $EnvPassVar -Value $Password
-    Set-Env -Name $EnvAppStreamCtxVar -Value $AppStreamCtx
+
+    # Session context is persisted to Machine/System env by default (requires admin).
+    Set-Env -Name $EnvAppStreamCtxVar -Value $AppStreamCtx -MachineOnly
     Write-Log ("Set env vars: " + $EnvUserVar + "," + $EnvIpVar + "," + $EnvPassVar + "," + $EnvAppStreamCtxVar)
 
     # 4) Display values FROM env vars

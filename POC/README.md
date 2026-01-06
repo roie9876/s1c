@@ -65,8 +65,16 @@ Behavior:
 - Fetches the pending request from `GET /api/fetch_connection?userId=<userId>`
 - Writes connection info into environment variables (defaults):
     - `S1C_USERNAME`, `S1C_TARGET_IP`, `S1C_PASSWORD`
+- Also writes the portal-provided session context into:
+    - `APPSTREAM_SESSION_CONTEXT`
 - Prints the values back *from the environment*
 - Starts SmartConsole with **no args** (no UI injection)
+
+Notes:
+- `APPSTREAM_SESSION_CONTEXT` is entered in the Portal UI (per logged-in portal user session) and is passed through the broker payload.
+- Credentials are set for the current process (so SmartConsole inherits them). You can also persist credentials to *User* scope using `-PersistUserEnv`.
+- `APPSTREAM_SESSION_CONTEXT` is persisted to *Machine/System* environment variables by default (so it shows under Windows "System variables"); this requires admin rights.
+- You can disable Machine persistence for the context with `-PersistContextMachineEnv:$false`.
 
 ### Legacy / Deprecated scripts
 
