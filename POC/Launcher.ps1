@@ -195,7 +195,7 @@ function Set-Env([string]$Name, [string]$Value, [switch]$MachineOnly) {
                 $usedTask = Try-SetMachineEnvViaScheduledTask -Name $Name -Value $Value
             }
             if ($usedTask) {
-                $msg = "Used Scheduled Task '$MachineEnvTaskName' to set Machine env var '$Name'."
+                $msg = "Queued Machine env update for '$Name' via '$MachineEnvRequestPath'. SYSTEM task '$MachineEnvTaskName' will apply shortly."
                 Write-Host "[INFO] $msg" -ForegroundColor DarkGray
                 Write-Log $msg
             }

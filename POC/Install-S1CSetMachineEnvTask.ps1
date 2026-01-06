@@ -85,18 +85,41 @@ public static class NativeMethods {
   } catch { }
 }
 
-if (-not (Test-Path \$RequestPath)) { exit 0 }
-\$raw = Get-Content -Path \$RequestPath -Raw -ErrorAction Stop
-if (-not \$raw) { exit 0 }
-\$obj = \$raw | ConvertFrom-Json
-\$name = [string]\$obj.name
-\$value = [string]\$obj.value
-if ([string]::IsNullOrWhiteSpace(\$name)) { exit 0 }
-if ([string]::IsNullOrWhiteSpace(\$value)) { exit 0 }
+try {
+  Log ("Run started. RequestPath=" + \$RequestPath)
 
-[Environment]::SetEnvironmentVariable(\$name, \$value, 'Machine')
-Broadcast-EnvChange
-Log ("Set Machine env var '" + \$name + "' to '" + \$value + "'.")
+  if (-not (Test-Path \$RequestPath)) {
+    Log ("Skip: request file not found")
+    exit 0
+  }
+
+  \$raw = Get-Content -Path \$RequestPath -Raw -ErrorAction Stop
+  if (-not \$raw) {
+    Log ("Skip: request file empty")
+    exit 0
+  }
+
+  \$obj = \$raw | ConvertFrom-Json
+  \$name = [string]\$obj.name
+  \$value = [string]\$obj.value
+  if ([string]::IsNullOrWhiteSpace(\$name)) {
+    Log ("Skip: name is empty")
+    exit 0
+  }
+  if ([string]::IsNullOrWhiteSpace(\$value)) {
+    Log ("Skip: value is empty")
+    exit 0
+  }
+
+  [Environment]::SetEnvironmentVariable(\$name, \$value, 'Machine')
+  Broadcast-EnvChange
+  Log ("OK: Set Machine env var '" + \$name + "' to '" + \$value + "'.")
+  exit 0
+}
+catch {
+  Log ("ERROR: " + \$_.Exception.Message)
+  exit 1
+}
 "@
 
 Set-Content -Path $ScriptPath -Value $script -Encoding UTF8 -Force
