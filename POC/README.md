@@ -76,6 +76,12 @@ Notes:
 - `APPSTREAM_SESSION_CONTEXT` is persisted to *Machine/System* environment variables by default (so it shows under Windows "System variables"); this requires admin rights.
 - You can disable Machine persistence for the context with `-PersistContextMachineEnv:$false`.
 
+If the launcher is not running as admin:
+- The launcher cannot directly write Machine/System env vars.
+- To still persist `APPSTREAM_SESSION_CONTEXT` as a System variable, install the on-demand SYSTEM Scheduled Task once (run on the AVD session host as Administrator):
+        - `powershell.exe -NoProfile -ExecutionPolicy Bypass -File C:\S1C\Install-S1CSetMachineEnvTask.ps1`
+    After that, the launcher will trigger the task `S1C-SetMachineEnv` automatically.
+
 ### Legacy / Deprecated scripts
 
 This PoC is intentionally kept to a single launcher script. Older runner/python experiments were removed.

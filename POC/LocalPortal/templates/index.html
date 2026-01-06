@@ -92,7 +92,8 @@
                         <td>{{ cust.user }}</td>
                         <td>{{ cust.avdUserId or '-' }}</td>
                         <td>
-                            <form action="/connect/{{ cust.id }}" method="POST">
+                            <form class="connect-form" action="/connect/{{ cust.id }}" method="POST">
+                                <input type="hidden" name="APPSTREAM_SESSION_CONTEXT" value="{{ appstream_session_context or '' }}" />
                                 <button type="submit" class="btn">Connect</button>
                             </form>
                         </td>
@@ -101,6 +102,27 @@
                 </tbody>
             </table>
         </div>
+
+        <script>
+            (function () {
+                function syncContext(form) {
+                    var ctxEl = document.getElementById('APPSTREAM_SESSION_CONTEXT');
+                    if (!ctxEl) return;
+                    var hidden = form.querySelector('input[name="APPSTREAM_SESSION_CONTEXT"]');
+                    if (!hidden) return;
+                    hidden.value = (ctxEl.value || '').trim();
+                }
+
+                var forms = document.querySelectorAll('form.connect-form');
+                for (var i = 0; i < forms.length; i++) {
+                    (function (form) {
+                        form.addEventListener('submit', function () {
+                            syncContext(form);
+                        });
+                    })(forms[i]);
+                }
+            })();
+        </script>
 
         <!-- LOCAL HISTORY -->
         <div class="card">

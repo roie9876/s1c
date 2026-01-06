@@ -262,6 +262,11 @@ def connect(customer_id):
         flash("You are not allowed to connect as that AVD user.", "error")
         return redirect(url_for('index'))
 
+    # Prefer value posted from the Connect form (lets user type and click Connect without a separate Save).
+    posted_ctx = (request.form.get("APPSTREAM_SESSION_CONTEXT") or "").strip()
+    if posted_ctx:
+        session["appstream_session_context"] = posted_ctx
+
     appstream_ctx = (session.get("appstream_session_context") or "").strip()
     if not appstream_ctx:
         flash("Please set APPSTREAM_SESSION_CONTEXT before connecting.", "error")

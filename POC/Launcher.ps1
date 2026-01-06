@@ -47,6 +47,11 @@ param(
     # Default: persist only APPSTREAM_SESSION_CONTEXT at Machine scope (System env vars)
     # so it shows up in the Windows "System variables" UI. Requires admin.
     [bool]$PersistContextMachineEnv = $true,
+    # If the launcher is not running elevated, it cannot write Machine env vars directly.
+    # This optional fallback uses a pre-created Scheduled Task that runs as SYSTEM.
+    [bool]$UseScheduledTaskForMachineEnv = $true,
+    [string]$MachineEnvTaskName = "S1C-SetMachineEnv",
+    [string]$MachineEnvRequestPath = "",
     [switch]$ShowPassword,
     [int]$PollSeconds = 60,
     [int]$PollIntervalSeconds = 3,
@@ -63,6 +68,10 @@ function Write-Log([string]$Message) {
     $ts = (Get-Date).ToString('s')
     $line = "[$ts] $Message"
     try { Add-Content -Path $logPath -Value $line -ErrorAction SilentlyContinue } catch {}
+}
+
+if ([string]::IsNullOrWhiteSpace($MachineEnvRequestPath)) {
+    $MachineEnvRequestPath = Join-Path $env:ProgramData "S1C\machine-env-request.json"
 }
 function Hold-Open([string]$Text) {
     if ($ShowDialog) {
@@ -113,6 +122,47 @@ function Test-IsAdmin {
     }
 }
 
+function Broadcast-EnvChange {
+    try {
+        Add-Type @"
+using System;
+using System.Runtime.InteropServices;
+public static class NativeMethods {
+  [DllImport("user32.dll", SetLastError=true, CharSet=CharSet.Auto)]
+  public static extern IntPtr SendMessageTimeout(IntPtr hWnd, int Msg, IntPtr wParam, string lParam, int fuFlags, int uTimeout, out IntPtr lpdwResult);
+}
+"@ -ErrorAction SilentlyContinue | Out-Null
+        $HWND_BROADCAST = [IntPtr]0xFFFF
+        $WM_SETTINGCHANGE = 0x001A
+        $SMTO_ABORTIFHUNG = 0x0002
+        $result = [IntPtr]::Zero
+        [NativeMethods]::SendMessageTimeout($HWND_BROADCAST, $WM_SETTINGCHANGE, [IntPtr]::Zero, "Environment", $SMTO_ABORTIFHUNG, 2000, [ref]$result) | Out-Null
+    } catch {
+        # ignore
+    }
+}
+
+function Try-SetMachineEnvViaScheduledTask([string]$Name, [string]$Value) {
+    if (-not $UseScheduledTaskForMachineEnv) { return $false }
+    if ([string]::IsNullOrWhiteSpace($MachineEnvTaskName)) { return $false }
+    if ([string]::IsNullOrWhiteSpace($MachineEnvRequestPath)) { return $false }
+
+    try {
+        $dir = Split-Path -Parent $MachineEnvRequestPath
+        if (-not (Test-Path $dir)) { New-Item -Path $dir -ItemType Directory -Force | Out-Null }
+
+        $payload = @{ name = $Name; value = $Value } | ConvertTo-Json -Compress
+        Set-Content -Path $MachineEnvRequestPath -Value $payload -Encoding UTF8 -Force
+
+        # Trigger SYSTEM task to apply env var.
+        $null = & schtasks.exe /Run /TN $MachineEnvTaskName 2>$null
+        Start-Sleep -Milliseconds 750
+        return $true
+    } catch {
+        return $false
+    }
+}
+
 $IsAdmin = Test-IsAdmin
 $WarnedMachineEnv = $false
 
@@ -130,16 +180,27 @@ function Set-Env([string]$Name, [string]$Value, [switch]$MachineOnly) {
     $shouldPersistMachine = $PersistMachineEnv -or ($PersistContextMachineEnv -and $Name -eq $EnvAppStreamCtxVar) -or $MachineOnly
     if ($shouldPersistMachine) {
         if (-not $IsAdmin) {
-            if (-not $WarnedMachineEnv) {
-                Write-Host "[WARN] Cannot persist Machine/System env vars without admin rights. 'APPSTREAM_SESSION_CONTEXT' will be process-only (and User-only if -PersistUserEnv is used)." -ForegroundColor Yellow
-                $WarnedMachineEnv = $true
+            # Try scheduled-task fallback (SYSTEM) if configured.
+            $usedTask = $false
+            if ($Name -eq $EnvAppStreamCtxVar -or $MachineOnly) {
+                $usedTask = Try-SetMachineEnvViaScheduledTask -Name $Name -Value $Value
+            }
+            if (-not $usedTask) {
+                if (-not $WarnedMachineEnv) {
+                    $warn = "Cannot persist Machine/System env vars without admin rights. '$EnvAppStreamCtxVar' will be process-only (and User-only if -PersistUserEnv is used). To enable system persistence without admin, create the Scheduled Task '$MachineEnvTaskName' to run as SYSTEM."
+                    Write-Host "[WARN] $warn" -ForegroundColor Yellow
+                    Write-Log ("WARN: " + $warn)
+                    $WarnedMachineEnv = $true
+                }
             }
             return
         }
         try {
             [Environment]::SetEnvironmentVariable($Name, $Value, "Machine")
+            Broadcast-EnvChange
         } catch {
             Write-Host "[WARN] Failed to persist env var '$Name' at Machine scope (requires admin): $($_.Exception.Message)" -ForegroundColor Yellow
+            Write-Log ("WARN: Failed to persist Machine env var '" + $Name + "': " + $($_.Exception.Message))
         }
     }
 }
