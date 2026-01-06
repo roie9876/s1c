@@ -1,6 +1,10 @@
 @echo off
 setlocal enableextensions
 
+REM DEPRECATED for the current PoC.
+REM Use PowerShell RemoteApp to run:
+REM   powershell.exe -NoProfile -ExecutionPolicy Bypass -File C:\S1C\Launcher.ps1
+
 REM PowerShell-free runner: uses Python to call the broker API and launch SmartConsole.
 REM
 REM Recommended RemoteApp target:

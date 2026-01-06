@@ -17,8 +17,7 @@ The goal is to migrate the existing AWS-based infrastructure to Azure, replacing
 *   **[POC/](POC/)**: Proof of Concept implementation code.
     *   **[POC/AzureFunction/](POC/AzureFunction/)**: Azure Functions (Python) acting as the broker API.
     *   **[POC/LocalPortal/](POC/LocalPortal/)**: A local simulator for the Infinity Portal to test the flow.
-    *   **[POC/LauncherRunner.ps1](POC/LauncherRunner.ps1)**: AVD RemoteApp bootstrapper. Downloads the latest launcher from `/api/dl` and runs it.
-    *   **[POC/Launcher.ps1](POC/Launcher.ps1)**: Legacy/experimental launcher (auto-login attempts). Not the current PoC path.
+    *   **[POC/Launcher.ps1](POC/Launcher.ps1)**: Single-script AVD RemoteApp launcher. Fetches a pending request, sets env vars, prints them, and launches SmartConsole with no UI injection.
 *   **[aws screnshots/](aws%20screnshots/)**: Reference images of the current AWS environment.
 
 ## Getting Started
@@ -28,8 +27,8 @@ The goal is to migrate the existing AWS-based infrastructure to Azure, replacing
 
 ## Current PoC State (Jan 2026)
 
-- **Launcher flow:** Manual password entry. The launcher pre-fills username + server/IP in SmartConsole; user types password.
-- **RemoteApp:** Publish `powershell.exe` RemoteApp that runs `C:\\sc1\\LuancherRunner.ps1` (current PoC image path/name).
+- **Launcher flow:** Launcher sets `S1C_USERNAME`, `S1C_TARGET_IP`, `S1C_PASSWORD` and launches SmartConsole with no args (no injection).
+- **RemoteApp:** Publish `powershell.exe` RemoteApp that runs `C:\\S1C\\Launcher.ps1`.
 - **Broker API:** Azure Function endpoints under `https://s1c-function-11729.azurewebsites.net/api`.
 
 See **[POC_TRACKING.md](POC_TRACKING.md)** for the handoff/runbook.

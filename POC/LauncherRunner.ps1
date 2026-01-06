@@ -3,6 +3,11 @@
   AVD RemoteApp bootstrapper.
   Downloads the latest Launcher.ps1 from the Azure Function (/api/dl) and runs it.
 
+.IMPORTANT
+    DEPRECATED for the current PoC.
+    Use the single-script launcher instead:
+        powershell.exe -NoProfile -ExecutionPolicy Bypass -File C:\S1C\Launcher.ps1
+
 .DESCRIPTION
   Use this script as the RemoteApp entrypoint:
     Path:      C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe

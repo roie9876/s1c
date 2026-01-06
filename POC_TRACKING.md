@@ -25,8 +25,7 @@ This document tracks the state of the Check Point Farm Migration PoC. Use this t
 | :--- | :--- | :--- |
 | **Azure Function** | ✅ Deployed | Python v2 model. Endpoints: `/queue_connection`, `/fetch_connection`, `/dl` (serves Launcher). |
 | **Cosmos DB** | ✅ Active | TTL enabled (60s). Partition Key: `/userId`. |
-| **Launcher (downloaded)** | ✅ Verified (Manual Password) | Downloaded from `/api/dl`. Launches SmartConsole and pre-fills username + server/IP; user types password manually. **Keeps RemoteApp alive by waiting for SmartConsole to exit.** |
-| **LauncherRunner.ps1** | ✅ Updated | RemoteApp bootstrapper: downloads latest launcher from `/api/dl` (cache-busted) and executes it. |
+| **Launcher (single script)** | ✅ Updated | `C:\S1C\Launcher.ps1` fetches a pending request, sets env vars (`S1C_USERNAME`/`S1C_TARGET_IP`/`S1C_PASSWORD`), prints them, and launches SmartConsole with **no args** (no UI injection). Keeps RemoteApp alive by waiting for SmartConsole to exit. |
 | **Local Portal** | ✅ Fixed | Flask App running on port **5001**. Includes PoC user mapping via `avdUserId`. |
 | **AVD Environment** | ✅ Verified | Clipboard fixed. **End-to-End Test Passed:** Launcher retrieved context and started app. |
 
@@ -55,28 +54,21 @@ Create an AVD RemoteApp (Application Group → Applications → Add) with:
 - **Application source:** File path
 - **Application path:** `C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe`
 - **Require command line:** Yes
-- **Command line:** `-NoProfile -ExecutionPolicy Bypass -Command "& 'C:\sc1\LuancherRunner.ps1'"`
+- **Command line:** `-NoProfile -ExecutionPolicy Bypass -File "C:\S1C\Launcher.ps1"`
 - **Icon path (optional):** `C:\Program Files (x86)\CheckPoint\SmartConsole\R82\PROGRAM\SmartConsole.exe` (Icon index 0)
 
 Notes:
-- Ensure `C:\sc1\LuancherRunner.ps1` exists on the session host image (current PoC image path/name).
+- Ensure `C:\S1C\Launcher.ps1` exists on the session host image.
 - For troubleshooting, temporarily add: `-NoExit` and `Read-Host` to keep the window open.
-- The published app must remain alive; the downloaded launcher now waits for SmartConsole to exit.
+- The published app must remain alive; the launcher waits for SmartConsole to exit.
 
 ## Troubleshooting & Logs
-
-On the AVD session host, for the signed-in user, check:
-
-- `%TEMP%\s1c-launcher\LauncherRunner.log` (bootstrapper download/execution)
-- `%TEMP%\s1c-launcher\Launcher.log` (downloaded launcher behavior)
 
 Common causes of “PowerShell opens then closes”:
 
 1. Wrong file path/typo in RemoteApp command line (PowerShell exits immediately).
-2. `C:\S1C\LauncherRunner.ps1` missing on the session host.
-
-    (For this PoC image: confirm `C:\sc1\LuancherRunner.ps1` exists.)
-3. Network/DNS blocks to `https://s1c-function-11729.azurewebsites.net/api/dl`.
+2. `C:\S1C\Launcher.ps1` missing on the session host.
+3. SmartConsole missing at the configured path.
 4. No pending request for the detected userId.
 
 ## Immediate Next Steps

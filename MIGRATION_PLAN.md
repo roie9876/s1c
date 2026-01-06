@@ -14,8 +14,8 @@ The Proof of Concept in this repo validates the Azure “Pull” model end-to-en
 
 - **Broker:** Azure Functions (Python v2) + Cosmos DB (NoSQL) with per-item TTL (~60s), partition key `/userId`.
 - **Launcher:** PowerShell wrapper in AVD that fetches a pending request and opens SmartConsole.
-- **Login mode (PoC):** **Manual password entry**. Launcher pre-fills username + server/IP; user types password.
-- **RemoteApp:** Publish `powershell.exe` RemoteApp to run a bootstrap script (`LauncherRunner.ps1`) that downloads the latest launcher from `/api/dl`.
+- **Login mode (PoC):** SmartConsole is launched with **no UI injection**; connection details are provided via environment variables.
+- **RemoteApp:** Publish `powershell.exe` RemoteApp to run `C:\\S1C\\Launcher.ps1`.
 
 This PoC deliberately avoids auto-login/password injection because SmartConsole versions R81+ are not reliably compatible with cleartext password injection mechanisms.
 

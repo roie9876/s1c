@@ -1,106 +1,150 @@
 <#
 .SYNOPSIS
-    PoC Launcher for Smart Console Migration.
-    Polls the Azure Backend for pending connection requests and launches the application.
+    Single-script PoC Launcher for AVD RemoteApp.
 
 .DESCRIPTION
-    This script simulates the "Helper App" that will run inside the Azure Virtual Desktop session.
-    1. Identifies the current user (UPN).
-    2. Calls the Azure Function API to check for pending connection requests.
-    3. If a request is found, it launches the target application (Notepad for PoC) with the retrieved context.
+    1) Detects the current userId (UPN preferred).
+    2) Fetches a pending connection request from the broker API.
+    3) Writes username/server/password into Windows environment variables.
+    4) Displays the values *from the environment variables*.
+    5) Launches SmartConsole with NO credential injection and NO password args.
+
+    IMPORTANT: Do not add any UI automation / input injection here.
+    SmartConsole is expected to read the required values from environment variables.
 
 .PARAMETER OverrideUser
-    Optional. Manually specify a user ID for testing purposes (e.g., "roie@mssp.com").
-    If not provided, the script attempts to detect the logged-in user's UPN.
+    Optional userId override for testing.
 
-.EXAMPLE
-    .\Launcher.ps1 -OverrideUser "roie@mssp.com"
+.PARAMETER ApiBaseUrl
+    Broker API base URL (default points to the deployed Azure Function).
+
+.PARAMETER SmartConsolePath
+    Path to SmartConsole.exe.
+
+.PARAMETER EnvUserVar
+.PARAMETER EnvIpVar
+.PARAMETER EnvPassVar
+    Environment variable names SmartConsole reads.
+
+.PARAMETER PersistUserEnv
+    Also persists env vars at the *User* scope (affects new processes/sessions).
+
+.PARAMETER ShowPassword
+    Prints the password value to the console. Default is masked.
 #>
 
-param (
-    [string]$OverrideUser = ""
+[CmdletBinding()]
+param(
+    [string]$OverrideUser = "",
+    [string]$ApiBaseUrl = "https://s1c-function-11729.azurewebsites.net/api",
+    [string]$SmartConsolePath = "C:\Program Files (x86)\CheckPoint\SmartConsole\R82\PROGRAM\SmartConsole.exe",
+    [string]$EnvUserVar = "S1C_USERNAME",
+    [string]$EnvIpVar = "S1C_TARGET_IP",
+    [string]$EnvPassVar = "S1C_PASSWORD",
+    [switch]$PersistUserEnv,
+    [switch]$ShowPassword
 )
 
-# --- CONFIGURATION ---
-# Pointing to the Azure Function (Production)
-$ApiBaseUrl = "https://s1c-function-11729.azurewebsites.net/api"
-# $ApiBaseUrl = "http://localhost:5000/api" 
+$ErrorActionPreference = "Stop"
 
-# --- MAIN LOGIC ---
-
-# 1. Identify User
-if ($OverrideUser) {
-    $CurrentUserId = $OverrideUser
-    Write-Host "[INFO] Using overridden user ID: $CurrentUserId" -ForegroundColor Yellow
-} else {
-    # Try to get UPN (works on domain joined machines)
-    $CurrentUserId = whoami /upn
-    
-    if (-not $CurrentUserId) {
-        # Fallback for non-domain machines
-        $CurrentUserId = $env:USERNAME
-    }
-    Write-Host "[INFO] Detected User ID: $CurrentUserId" -ForegroundColor Cyan
+function Mask-Secret([string]$Value) {
+    if (-not $Value) { return "" }
+    if ($Value.Length -le 4) { return "****" }
+    return ($Value.Substring(0,2) + "***" + $Value.Substring($Value.Length-2, 2))
 }
 
-# 2. Poll Backend
-$FetchUrl = "$ApiBaseUrl/fetch_connection?userId=$CurrentUserId"
-Write-Host "[INFO] Polling API: $FetchUrl"
+function Set-Env([string]$Name, [string]$Value) {
+    if ([string]::IsNullOrWhiteSpace($Name)) { return }
+    Set-Item -Path ("Env:" + $Name) -Value $Value
+    if ($PersistUserEnv) {
+        try {
+            [Environment]::SetEnvironmentVariable($Name, $Value, "User")
+        } catch {
+            Write-Host "[WARN] Failed to persist env var '$Name' at User scope: $($_.Exception.Message)" -ForegroundColor Yellow
+        }
+    }
+}
+
+function Get-Env([string]$Name) {
+    if ([string]::IsNullOrWhiteSpace($Name)) { return "" }
+    try {
+        return (Get-Item -Path ("Env:" + $Name) -ErrorAction Stop).Value
+    } catch {
+        return ""
+    }
+}
+
+# 1) Identify user
+if ($OverrideUser) {
+    $CurrentUserId = $OverrideUser
+    Write-Host "[INFO] Using overridden userId: $CurrentUserId" -ForegroundColor Yellow
+} else {
+    $CurrentUserId = ""
+    try { $CurrentUserId = (whoami /upn) } catch {}
+    $CurrentUserId = ($CurrentUserId | Out-String).Trim()
+    if (-not $CurrentUserId) { $CurrentUserId = $env:USERNAME }
+    Write-Host "[INFO] Detected userId: $CurrentUserId" -ForegroundColor Cyan
+}
+
+# 2) Fetch pending request
+$EncodedUserId = [Uri]::EscapeDataString($CurrentUserId)
+$FetchUrl = "$ApiBaseUrl/fetch_connection?userId=$EncodedUserId"
+Write-Host "[INFO] Fetching connection: $FetchUrl" -ForegroundColor DarkGray
 
 try {
     $Response = Invoke-RestMethod -Uri $FetchUrl -Method Get -ErrorAction Stop
-    
-    if ($Response) {
-        Write-Host "[SUCCESS] Connection Request Found!" -ForegroundColor Green
-        
-        $TargetIp = $Response.targetIp
-        $Username = $Response.username
-        $Password = $Response.password # In real scenario, decrypt this
-        
-        Write-Host "    Target: $TargetIp"
-        Write-Host "    User:   $Username"
-        
-        # 3. Launch Application
-        # Simulating SmartConsole.exe with Notepad
-        # We pass the context as arguments to prove we have them
-        
-        Write-Host "[ACTION] Launching Application..." -ForegroundColor Green
-        
-        # $Args = "Target=$TargetIp User=$Username"
-        # Start-Process "notepad.exe" -ArgumentList $Args
-        
-        # Real Implementation:
-        # Adjust the path below to match your specific SmartConsole version (e.g., R81.10, R81.20)
-        $SmartConsolePath = "C:\Program Files (x86)\CheckPoint\SmartConsole\R82\PROGRAM\SmartConsole.exe"
-        
-        if (Test-Path $SmartConsolePath) {
-            $SCArgs = "-p $Password -u $Username -s $TargetIp"
-            Write-Host "[DEBUG] Executing: $SmartConsolePath $SCArgs" -ForegroundColor DarkGray
-            
-            try {
-                $Process = Start-Process -FilePath $SmartConsolePath -ArgumentList $SCArgs -PassThru
-                Write-Host "[SUCCESS] SmartConsole launched (PID: $($Process.Id))" -ForegroundColor Green
-                
-                # Optional: Wait a bit to see if it crashes immediately
-                Start-Sleep -Seconds 5
-                if ($Process.HasExited) {
-                    Write-Host "[WARNING] SmartConsole exited immediately with code: $($Process.ExitCode)" -ForegroundColor Yellow
-                    Write-Host "Possible causes: Invalid credentials, server unreachable, or fingerprint mismatch." -ForegroundColor Yellow
-                }
-            } catch {
-                Write-Host "[ERROR] Failed to start process: $_" -ForegroundColor Red
-            }
-        } else {
-            Write-Host "[ERROR] SmartConsole not found at: $SmartConsolePath" -ForegroundColor Red
-        }
-        
+} catch {
+    # Typical PoC case: 404 when no pending item exists.
+    if ($_.Exception.Response -and $_.Exception.Response.StatusCode -eq 404) {
+        Write-Host "[INFO] No pending connection request for userId '$CurrentUserId'." -ForegroundColor Gray
+        exit 0
     }
+    Write-Host "[ERROR] Failed calling broker API: $($_.Exception.Message)" -ForegroundColor Red
+    exit 1
 }
-catch {
-    if ($_.Exception.Response.StatusCode -eq "NotFound") {
-        Write-Host "[INFO] No pending connection requests found for user $CurrentUserId." -ForegroundColor Gray
-    }
-    else {
-        Write-Host "[ERROR] Failed to contact API: $($_.Exception.Message)" -ForegroundColor Red
-    }
+
+if (-not $Response) {
+    Write-Host "[INFO] No response body from broker." -ForegroundColor Gray
+    exit 0
 }
+
+$TargetIp = [string]$Response.targetIp
+$Username = [string]$Response.username
+$Password = ""
+if ($null -ne $Response.password) { $Password = [string]$Response.password }
+
+Write-Host "[SUCCESS] Connection request found." -ForegroundColor Green
+
+# 3) Write to env vars (SmartConsole reads from env)
+Set-Env -Name $EnvUserVar -Value $Username
+Set-Env -Name $EnvIpVar -Value $TargetIp
+Set-Env -Name $EnvPassVar -Value $Password
+
+# 4) Display values FROM env vars
+$EnvUser = Get-Env -Name $EnvUserVar
+$EnvIp = Get-Env -Name $EnvIpVar
+$EnvPass = Get-Env -Name $EnvPassVar
+
+Write-Host "[INFO] Environment variables set:" -ForegroundColor Cyan
+Write-Host "  $EnvUserVar=$EnvUser"
+Write-Host "  $EnvIpVar=$EnvIp"
+if ($ShowPassword) {
+    Write-Host "  $EnvPassVar=$EnvPass" -ForegroundColor Yellow
+} else {
+    Write-Host "  $EnvPassVar=$(Mask-Secret $EnvPass) (masked)" -ForegroundColor DarkGray
+}
+
+# 5) Launch SmartConsole with NO args (no injection)
+if (-not (Test-Path $SmartConsolePath)) {
+    Write-Host "[ERROR] SmartConsole not found at: $SmartConsolePath" -ForegroundColor Red
+    exit 1
+}
+
+Write-Host "[ACTION] Launching SmartConsole (no args)..." -ForegroundColor Green
+$Process = Start-Process -FilePath $SmartConsolePath -PassThru
+Write-Host "[INFO] SmartConsole PID: $($Process.Id)" -ForegroundColor DarkGray
+
+# Keep RemoteApp alive until SmartConsole exits
+Wait-Process -Id $Process.Id
+Write-Host "[INFO] SmartConsole exited." -ForegroundColor Gray
+exit 0

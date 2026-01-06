@@ -7,10 +7,10 @@ This folder contains the artifacts required to validate the "Pull" model (Queue 
 2.  **Azure Function (Python):** Acts as the broker API.
     *   `POST /api/queue_connection`: Simulates the Infinity Portal creating a request.
     *   `GET /api/fetch_connection`: Called by the Launcher to retrieve credentials.
-    *   `GET /api/dl`: Serves the latest launcher PowerShell script.
+    *   `GET /api/dl`: Legacy endpoint used by older bootstrapper flows (not required for the single-script launcher path).
 3.  **PowerShell Launcher:** Runs on the client (AVD), polls the API, and launches the application.
 
-**Current PoC behavior:** SmartConsole is launched and the login UI is pre-filled (username + server/IP). The user types the password manually.
+**Current PoC behavior:** The launcher sets connection details into Windows environment variables and launches SmartConsole **without injecting anything into the UI**.
 
 ## Prerequisites
 1.  **Azure Cosmos DB Account (NoSQL API):**
@@ -50,37 +50,26 @@ Contains the Python code for the real Azure deployment.
 *   **Deploy:** Use VS Code Azure Functions extension or `func azure functionapp publish <APP_NAME>`.
 *   **Local Run:** `func start`
 
-### 3. AVD RemoteApp Bootstrapper (`LauncherRunner.ps1`)
+### 3. AVD RemoteApp Launcher (Single Script: `Launcher.ps1`)
 
 This is the intended PoC entry point for Azure Virtual Desktop.
 
 - Publish a RemoteApp for:
     - `C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe`
-    - Command line (current VM image): `-NoProfile -ExecutionPolicy Bypass -Command "& 'C:\\sc1\\LuancherRunner.ps1'"`
+    - Command line: `-NoProfile -ExecutionPolicy Bypass -File C:\\S1C\\Launcher.ps1`
 
-- Alternative (recommended if the PowerShell window has keyboard/input issues):
-    - `C:\\Windows\\System32\\cmd.exe`
-    - Command line: `/c C:\\S1C\\LauncherRunner.cmd`
-- The runner downloads the latest launcher from `GET /api/dl` into `%TEMP%\\s1c-launcher\\Launcher.ps1` and runs it.
+Behavior:
+- Fetches the pending request from `GET /api/fetch_connection?userId=<userId>`
+- Writes connection info into environment variables (defaults):
+    - `S1C_USERNAME`, `S1C_TARGET_IP`, `S1C_PASSWORD`
+- Prints the values back *from the environment*
+- Starts SmartConsole with **no args** (no UI injection)
 
-- PowerShell-free alternative (recommended if PowerShell itself is unusable):
-    - Install Python 3.13+ on the session host.
-    - `C:\\Windows\\System32\\cmd.exe`
-    - Command line: `/c C:\\S1C\\LauncherRunnerPy.cmd`
-    - This uses `C:\\S1C\\LauncherPy.py` to call `GET /api/fetch_connection` and launch SmartConsole.
+### Legacy / Deprecated scripts
 
-Logs on the session host:
-
-- `%TEMP%\\s1c-launcher\\LauncherRunner.log`
-- `%TEMP%\\s1c-launcher\\Launcher.log`
-
-Python launcher log:
-
-- `%TEMP%\\s1c-launcher\\LauncherPy.log`
-
-### 4. Legacy Launcher (`Launcher.ps1`)
-
-`POC/Launcher.ps1` contains older experiments (auto-login attempts). It is not the current PoC path.
+The repo still contains older runner/python experiments, but they are no longer the recommended PoC path:
+- `LauncherRunner.ps1`, `LauncherRunner.cmd`
+- `LauncherRunnerPy.cmd`, `LauncherPy.py`
 
 ## Testing the Flow (Local Portal Method)
 
@@ -95,12 +84,10 @@ Python launcher log:
     *   You should see a request with Status: **PENDING**.
 
 3.  **Run the Launcher:**
-    *   In AVD, launch the published RemoteApp (PowerShell) which runs `C:\\S1C\\LauncherRunner.ps1`.
-    *   The runner will download the latest launcher from the Azure Function and start SmartConsole.
+    *   In AVD, launch the published RemoteApp (PowerShell) which runs `C:\\S1C\\Launcher.ps1`.
+    *   The launcher will set environment variables and start SmartConsole.
 
 4.  **Observe Results:**
-    *   **PowerShell/Logs:** Should show `[SUCCESS] Connection Request Found!`.
-    *   **SmartConsole:** Opens and pre-fills username + server/IP; user types password manually.
-    *   **Troubleshooting:** If RemoteApp opens then closes immediately, check:
-        *   `C:\\S1C\\LauncherRunner.ps1` exists on the session host.
-        *   `%TEMP%\\s1c-launcher\\LauncherRunner.log` and `%TEMP%\\s1c-launcher\\Launcher.log`.
+    *   **PowerShell:** Should show `[SUCCESS] Connection request found.`.
+    *   **SmartConsole:** Opens (no UI injection). Connection details are available via environment variables.
+    *   **Troubleshooting:** If RemoteApp opens then closes immediately, verify the RemoteApp command line and that SmartConsole exists at the configured path.
