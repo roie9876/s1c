@@ -10,11 +10,18 @@ from dotenv import load_dotenv
 load_dotenv()
 
 app = Flask(__name__)
-app.secret_key = 'supersecretkey'  # Needed for flash messages
+app.secret_key = os.getenv('FLASK_SECRET_KEY', 'supersecretkey')  # Needed for flash messages
 
 # --- CONFIGURATION ---
 # The URL of your deployed Azure Function
-AZURE_FUNCTION_URL = "https://s1c-function-11729.azurewebsites.net/api/queue_connection"
+AZURE_FUNCTION_URL = os.getenv(
+    "AZURE_FUNCTION_URL",
+    "https://s1c-function-11729.azurewebsites.net/api/queue_connection",
+)
+
+# Optional: if set, after successfully queueing a request the portal will redirect the browser to this URL.
+# This enables a PoC demo of: click Connect -> AVD Web client opens.
+AVD_LAUNCH_URL = os.getenv("AVD_LAUNCH_URL", "").strip()
 
 # --- LOCAL LOG (To show history in UI) ---
 # Structure: { "userId": [ { request_obj }, ... ] }
@@ -30,7 +37,7 @@ CUSTOMERS = [
         "name": "Real Test (Azure VM) - cp1",
         "ip": "20.240.218.22",
         "user": "cp1",
-        "avdUserId": "cp1@roie9876gmail.onmicrosoft.com",
+        "avdUserId": "cp1@mydemodomain.org",
         "password": os.getenv("CP1_PASSWORD")
     },
     {
@@ -38,7 +45,7 @@ CUSTOMERS = [
         "name": "Real Test (Azure VM) - Admin",
         "ip": "20.240.218.22",
         "user": "admin",
-        "avdUserId": "cp2@roie9876gmail.onmicrosoft.com",
+        "avdUserId": "cp2@mydemodomain.org",
         "password": os.getenv("ADMIN_PASSWORD")
     }
 ]
@@ -99,6 +106,9 @@ def connect(customer_id):
     }
     # Prepend to list
     REQUEST_HISTORY[user_id].insert(0, log_entry)
+
+    if status.startswith("SENT") and AVD_LAUNCH_URL:
+        return redirect(AVD_LAUNCH_URL)
 
     return redirect(url_for('index'))
 

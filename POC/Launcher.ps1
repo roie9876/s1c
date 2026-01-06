@@ -43,6 +43,8 @@ param(
     [string]$EnvPassVar = "S1C_PASSWORD",
     [switch]$PersistUserEnv,
     [switch]$ShowPassword,
+    [int]$PollSeconds = 60,
+    [int]$PollIntervalSeconds = 3,
     [int]$HoldSeconds = 10,
     [switch]$ShowDialog
 )
@@ -119,6 +121,7 @@ function Get-Env([string]$Name) {
 
 try {
     Write-Log "Launcher started"
+    Write-Host "[INFO] Log file: $logPath" -ForegroundColor DarkGray
     try { Write-Log ("whoami_upn=" + (whoami /upn)) } catch {}
     Write-Log ("PSVersion=" + $PSVersionTable.PSVersion)
 
@@ -136,29 +139,46 @@ try {
         Write-Log ("Detected userId=" + $CurrentUserId)
     }
 
-    # 2) Fetch pending request
+    # 2) Fetch pending request (optionally poll on 404)
     $EncodedUserId = [Uri]::EscapeDataString($CurrentUserId)
     $FetchUrl = "$ApiBaseUrl/fetch_connection?userId=$EncodedUserId"
     Write-Host "[INFO] Fetching connection..." -ForegroundColor DarkGray
     Write-Log ("FetchUrl=" + $FetchUrl)
 
-    try {
-        $Response = Invoke-RestMethod -Uri $FetchUrl -Method Get -ErrorAction Stop
-    } catch {
-        $status = Try-GetHttpStatusCode $_
-        if ($status -eq 404) {
-            $msg = "No pending connection request for userId '$CurrentUserId'."
-            Write-Host "[INFO] $msg" -ForegroundColor Gray
+    $Response = $null
+    $pollUntil = $null
+    if ($PollSeconds -gt 0) {
+        $pollUntil = (Get-Date).AddSeconds($PollSeconds)
+        if ($PollIntervalSeconds -le 0) { $PollIntervalSeconds = 3 }
+    }
+
+    while ($true) {
+        try {
+            $Response = Invoke-RestMethod -Uri $FetchUrl -Method Get -ErrorAction Stop
+            break
+        } catch {
+            $status = Try-GetHttpStatusCode $_
+            if ($status -eq 404) {
+                if ($pollUntil -and (Get-Date) -lt $pollUntil) {
+                    Write-Host "[INFO] No pending request yet. Waiting..." -ForegroundColor Gray
+                    Write-Log "No pending request yet; polling"
+                    Start-Sleep -Seconds $PollIntervalSeconds
+                    continue
+                }
+
+                $msg = "No pending connection request for userId '$CurrentUserId'."
+                Write-Host "[INFO] $msg" -ForegroundColor Gray
+                Write-Log $msg
+                Hold-Open ("$msg`n`nLog: $logPath")
+                exit 0
+            }
+
+            $msg = "Failed calling broker API. status=$status err=$($_.Exception.Message)"
+            Write-Host "[ERROR] $msg" -ForegroundColor Red
             Write-Log $msg
             Hold-Open ("$msg`n`nLog: $logPath")
-            exit 0
+            exit 1
         }
-
-        $msg = "Failed calling broker API. status=$status err=$($_.Exception.Message)"
-        Write-Host "[ERROR] $msg" -ForegroundColor Red
-        Write-Log $msg
-        Hold-Open ("$msg`n`nLog: $logPath")
-        exit 1
     }
 
     if (-not $Response) {

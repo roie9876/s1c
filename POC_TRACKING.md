@@ -23,7 +23,7 @@ This document tracks the state of the Check Point Farm Migration PoC. Use this t
 
 | Component | Status | Notes |
 | :--- | :--- | :--- |
-| **Azure Function** | ✅ Deployed | Python v2 model. Endpoints: `/queue_connection`, `/fetch_connection`, `/dl` (serves Launcher). |
+| **Azure Function** | ✅ Deployed | Python v2 model. Endpoints: `/queue_connection`, `/fetch_connection`. |
 | **Cosmos DB** | ✅ Active | TTL enabled (60s). Partition Key: `/userId`. |
 | **Launcher (single script)** | ✅ Updated | `C:\S1C\Launcher.ps1` fetches a pending request, sets env vars (`S1C_USERNAME`/`S1C_TARGET_IP`/`S1C_PASSWORD`), prints them, and launches SmartConsole with **no args** (no UI injection). Keeps RemoteApp alive by waiting for SmartConsole to exit. |
 | **Local Portal** | ✅ Fixed | Flask App running on port **5001**. Includes PoC user mapping via `avdUserId`. |
@@ -37,14 +37,12 @@ This document tracks the state of the Check Point Farm Migration PoC. Use this t
 5.  Updated `LocalPortal/templates/index.html` with a proper UI (Flash messages, History).
 6.  Changed Local Portal port to **5001** to avoid 403 errors.
 7.  Updated `LocalPortal/app.py` to handle HTTP 201 responses from Azure.
-8.  Added `/dl` endpoint to Azure Function for easy script download.
+8.  Removed legacy script-download endpoints from the Azure Function.
 9.  **Verified End-to-End Flow:** Portal -> Azure -> AVD -> Launcher -> App Launch.
 10. **Updated Launcher:** Switched to `SmartConsole.exe` (R82 path).
-11. **Recovered & Redeployed Function App:** Restored clean `function_app.py` and confirmed `/api/dl` returns the script (HTTP 200).
-12. **Changed Login Flow:** Auto-login was dropped; password is typed manually in SmartConsole.
-13. **RemoteApp Bootstrapper:** Publish `powershell.exe` RemoteApp to run `C:\sc1\LuancherRunner.ps1` which downloads `/api/dl`.
-14. **Anti-caching fixes:** `/api/dl` adds `Cache-Control: no-store` and runner uses `?nocache=<guid>`.
-15. **RemoteApp stability fix:** Launcher now waits for SmartConsole process to exit (prevents RemoteApp session from ending immediately).
+11. **Changed Login Flow:** SmartConsole is launched with no UI injection; connection details are provided via environment variables.
+12. **Simplified Launcher:** Consolidated to a single script `C:\S1C\Launcher.ps1`.
+13. **RemoteApp stability fix:** Launcher waits for SmartConsole process to exit (prevents RemoteApp session from ending immediately).
 16. **Persistent logs added:** See “Troubleshooting & Logs” below.
 
 ## RemoteApp Configuration (Known-Good)

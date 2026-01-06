@@ -7,7 +7,6 @@ This folder contains the artifacts required to validate the "Pull" model (Queue 
 2.  **Azure Function (Python):** Acts as the broker API.
     *   `POST /api/queue_connection`: Simulates the Infinity Portal creating a request.
     *   `GET /api/fetch_connection`: Called by the Launcher to retrieve credentials.
-    *   `GET /api/dl`: Legacy endpoint used by older bootstrapper flows (not required for the single-script launcher path).
 3.  **PowerShell Launcher:** Runs on the client (AVD), polls the API, and launches the application.
 
 **Current PoC behavior:** The launcher sets connection details into Windows environment variables and launches SmartConsole **without injecting anything into the UI**.
@@ -45,6 +44,8 @@ A Python Flask web application that simulates both the Infinity Portal UI and th
 
 **User mapping (PoC):** the portal simulator can queue requests under a specific AVD Entra UPN using the `avdUserId` field in `CUSTOMERS`.
 
+Optional (for demo): You can set `AVD_LAUNCH_URL` for the portal so clicking **Connect** redirects the browser to AVD Web.
+
 ### 2. Azure Function (`/AzureFunction`) - *Optional for Local Test*
 Contains the Python code for the real Azure deployment.
 *   **Deploy:** Use VS Code Azure Functions extension or `func azure functionapp publish <APP_NAME>`.
@@ -67,9 +68,13 @@ Behavior:
 
 ### Legacy / Deprecated scripts
 
-The repo still contains older runner/python experiments, but they are no longer the recommended PoC path:
-- `LauncherRunner.ps1`, `LauncherRunner.cmd`
-- `LauncherRunnerPy.cmd`, `LauncherPy.py`
+This PoC is intentionally kept to a single launcher script. Older runner/python experiments were removed.
+
+## SSO / Federation PoC (Keycloak)
+
+If you want to mimic “Infinity Portal uses some SAML IdP” and then federate Entra to that IdP (to reduce/avoid a second login prompt in AVD Web), see:
+
+- [POC/Keycloak/README.md](POC/Keycloak/README.md)
 
 ## Testing the Flow (Local Portal Method)
 
