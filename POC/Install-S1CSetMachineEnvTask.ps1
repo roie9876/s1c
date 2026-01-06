@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-  One-time setup: installs an on-demand Scheduled Task that runs as SYSTEM and sets a Windows Machine/System environment variable.
+  One-time setup: installs a Scheduled Task that runs as SYSTEM and sets a Windows Machine/System environment variable.
 
 .DESCRIPTION
   This is used by Launcher.ps1 when it is not running elevated, so it can still persist APPSTREAM_SESSION_CONTEXT as a System variable.
@@ -9,7 +9,7 @@
 
   It creates:
     - C:\ProgramData\S1C\SetMachineEnvFromFile.ps1
-    - Scheduled Task: S1C-SetMachineEnv (Run as SYSTEM, OnDemand)
+    - Scheduled Task: S1C-SetMachineEnv (Run as SYSTEM, runs every minute)
 
 .NOTES
   If your environment blocks Scheduled Tasks or PowerShell execution, you may need to adapt policy.
