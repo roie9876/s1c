@@ -61,6 +61,13 @@ This PoC deliberately avoids auto-login/password injection because SmartConsole 
 - The result is an authenticated browser session (cookies on `*.checkpoint.com` / `*.portal.checkpoint.com`). After the session is established, subsequent portal actions rely on the session rather than repeatedly collecting credentials.
 - Unless explicit federation is configured, there is no evidence in the default flow that an external IdP (for example AWS Cognito or Microsoft Entra ID) is participating.
 
+**Infinity Portal “Login with GitHub” (observed):**
+- The GitHub option appears to use a standard browser-based OAuth redirect flow.
+- Observed redirect chain (host + path only):
+    - `https://cloudinfra-gw.portal.checkpoint.com/oauth/github` → `https://github.com/login/oauth/authorize` → `https://github.com/login/oauth/select_account`
+- A redacted capture is kept in [POC/Artifacts/har/github_login_redacted.har.json](POC/Artifacts/har/github_login_redacted.har.json) (headers, cookies, query strings, and bodies stripped).
+- This is useful only as evidence that the portal can federate to an external IdP; enabling Microsoft Entra ID SSO would still require explicit vendor-side configuration/support.
+
 **Smart-1 Cloud launch via AppStream (current):**
 - The Infinity Portal acts as an access broker; the user does not authenticate to AWS directly.
 - Clicking the Smart-1 Cloud tile triggers a browser call to a Check Point backend API authorized by the existing Infinity session, for example:
