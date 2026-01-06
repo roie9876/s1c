@@ -64,7 +64,7 @@ param(
     [switch]$ShowDialog
 )
 
-$ScriptVersion = "2026-01-06"  # bump when Launcher behavior changes
+$ScriptVersion = "2026-01-06.2"  # bump when Launcher behavior changes
 
 $ErrorActionPreference = "Stop"
 
@@ -188,6 +188,11 @@ function Set-Env([string]$Name, [string]$Value, [switch]$MachineOnly) {
     if ($shouldPersistUser) {
         try {
             [Environment]::SetEnvironmentVariable($Name, $Value, "User")
+            if ($Name -eq $EnvAppStreamCtxVar) {
+                $msg = "Persisted '$Name' to User env (HKCU)"
+                Write-Host "[INFO] $msg" -ForegroundColor DarkGray
+                Write-Log $msg
+            }
         } catch {
             Write-Host "[WARN] Failed to persist env var '$Name' at User scope: $($_.Exception.Message)" -ForegroundColor Yellow
         }
