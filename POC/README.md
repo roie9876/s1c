@@ -46,9 +46,14 @@ A Python Flask web application that simulates both the Infinity Portal UI and th
 
 **User mapping (PoC):** requests are queued under the logged-in user identity (derived from Keycloak claims like `email` / `upn`). For the end-to-end flow to work, this value must match the AVD session user returned by `whoami /upn`.
 
-Optional (for demo): You can set `AVD_LAUNCH_URL` for the portal so clicking **Connect** redirects the browser to AVD Web.
+Configuration is loaded from `POC/LocalPortal/.env`.
 
-Optional (preferred for this PoC): configure direct launch for a specific RemoteApp by setting in `POC/LocalPortal/.env`:
+Public repo hygiene:
+- Commit the sample file `POC/LocalPortal/.env.example`.
+- Do **not** commit your real `POC/LocalPortal/.env`.
+
+Optional (preferred for this PoC): configure direct launch for a specific RemoteApp by setting:
+- `AVD_DIRECT_REMOTEAPP_BASE_URL` (default: `https://windows.cloud.microsoft/webclient/avd`)
 - `AVD_WORKSPACE_OBJECT_ID`
 - `AVD_REMOTEAPP_OBJECT_ID`
 
@@ -57,13 +62,16 @@ Optional (preferred for this PoC): configure direct launch for a specific Remote
 In practice, the AVD Web Client (`client.wvd.microsoft.com`) initiates sign-in via MSAL against the `login.microsoftonline.com/common` endpoint.
 This can cause a username prompt even when passing `tenantId`/`login_hint` on the AVD URL.
 
-**Working approach in this PoC:** after a successful queue request, the portal shows a small helper page that:
-1. Boots a Microsoft session using the correct tenant + user hint (may show “Do you trust …” and “Stay signed in?” the first time).
-2. Opens the AVD Web Client (Smart Console).
+**Working approach in this PoC:** after a successful queue request, the portal first performs an Entra “bootstrap” redirect (tenant-specific) to establish Microsoft session cookies, then forwards into the AVD web client.
+
+Implementation note:
+- The portal attempts a **silent bootstrap first** (`prompt=none`) to reduce the chance of seeing a Microsoft account picker.
+- If Entra responds that user interaction is required, the portal automatically retries with an interactive bootstrap.
 
 Configure these environment variables in `POC/LocalPortal/.env`:
 - `ENTRA_TENANT_ID` (tenant GUID / Directory ID)
-- Optional: `ENTRA_BOOTSTRAP_BASE_URL` (default: `https://myapplications.microsoft.com/`)
+- `ENTRA_BOOTSTRAP_CLIENT_ID` (App Registration client ID for the bootstrap redirect)
+- Optional: `ENTRA_BOOTSTRAP_REDIRECT_URI` (default: `http://localhost:5001/entra/callback`)
 
 ### 2. Azure Function (`/AzureFunction`) - *Optional for Local Test*
 Contains the Python code for the real Azure deployment.
@@ -76,7 +84,7 @@ This is the intended PoC entry point for Azure Virtual Desktop.
 
 - Publish a RemoteApp for:
     - `C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe`
-- Command line example (current PoC): `-NoProfile -ExecutionPolicy Bypass -File "C:\\SC1\\Launcher.ps1" -ShowDialog -HoldSeconds 0`
+- Command line example (current PoC): `-NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -WindowStyle Hidden -File "C:\\SC1\\Launcher.ps1" -HoldSeconds 0`
 
 Behavior:
 - Fetches the pending request from `GET /api/fetch_connection?userId=<userId>`
@@ -114,10 +122,10 @@ From macOS:
     - `az login`
 3. Publish:
     - `cd POC/AzureFunction`
-    - `func azure functionapp publish s1c-function-11729`
+    - `func azure functionapp publish <YOUR_FUNCTION_APP_NAME>`
 
 Quick validation (after queueing a request):
-- `curl "https://s1c-function-11729.azurewebsites.net/api/fetch_connection?userId=cp1%40mydemodomain.org"`
+- `curl "https://<your-function-app>.azurewebsites.net/api/fetch_connection?userId=<userIdUPNUrlEncoded>"`
 - The JSON response should include `appstreamSessionContext`.
 
 ## Verifying APPSTREAM_SESSION_CONTEXT (Per-User vs System)

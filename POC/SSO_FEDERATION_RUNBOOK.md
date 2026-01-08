@@ -42,11 +42,11 @@ Therefore the working strategy is:
 ## Configuration
 
 ### 1) Entra tenant
-- Tenant ID (Directory ID): `f6bb3dce-afab-4b8f-8fb9-6eefd953925b`
+- Tenant ID (Directory ID): `<YOUR_ENTRA_TENANT_ID_GUID>`
 
 ### 2) Keycloak (realm: `s1c`)
 Portal OIDC uses Keycloak as configured in [POC/LocalPortal/.env](POC/LocalPortal/.env):
-- `KEYCLOAK_ISSUER_URL=https://idp.mydemodomain.org/realms/s1c`
+- `KEYCLOAK_ISSUER_URL=https://idp.example.com/realms/s1c`
 - `KEYCLOAK_CLIENT_ID=localportal`
 - `KEYCLOAK_REDIRECT_URI=http://localhost:5001/auth/callback`
 
@@ -65,13 +65,13 @@ Verification:
 
 ### 5) Local Portal runtime configuration
 In [POC/LocalPortal/.env](POC/LocalPortal/.env):
-- `AVD_LAUNCH_URL=https://client.wvd.microsoft.com/arm/webclient/index.html`
-- Optional (preferred for this PoC): direct launch of a specific RemoteApp
-   - `AVD_WORKSPACE_OBJECT_ID=<workspace ObjectId>`
-   - `AVD_REMOTEAPP_OBJECT_ID=<remote app ObjectId>`
+- Optional fallback: `AVD_LAUNCH_URL=https://client.wvd.microsoft.com/arm/webclient/index.html`
+- Preferred: direct launch of a specific RemoteApp
+   - `AVD_WORKSPACE_OBJECT_ID=<WORKSPACE_OBJECT_ID>`
+   - `AVD_REMOTEAPP_OBJECT_ID=<REMOTEAPP_OBJECT_ID>`
    - Optional: `AVD_DIRECT_REMOTEAPP_BASE_URL=https://windows.cloud.microsoft/webclient/avd`
-- `ENTRA_TENANT_ID=f6bb3dce-afab-4b8f-8fb9-6eefd953925b`
-- `PORTAL_TO_AVD_USER_MAP_JSON={"cp1":"cp1@mydemodomain.org","cp2":"cp2@mydemodomain.org"}`
+- `ENTRA_TENANT_ID=<YOUR_ENTRA_TENANT_ID_GUID>`
+- `PORTAL_TO_AVD_USER_MAP_JSON={"cp1":"cp1@yourdomain.example","cp2":"cp2@yourdomain.example"}`
 
 #### Entra bootstrap app (required for true one-click)
 To avoid racing multiple tabs and reduce username prompts, the Portal can use a dedicated Entra app registration to bootstrap session cookies.
@@ -88,6 +88,10 @@ Then set in [POC/LocalPortal/.env](POC/LocalPortal/.env):
 - Optional: `ENTRA_BOOTSTRAP_REDIRECT_URI=http://localhost:5001/entra/callback`
 
 No client secret is required for this PoC (authorization code is not redeemed; the purpose is establishing a browser session).
+
+Implementation detail (current portal behavior):
+- The portal attempts a silent bootstrap first (`prompt=none`) to reduce the chance of the Microsoft “Pick an account” screen.
+- If Entra returns `login_required` / `interaction_required` / `consent_required`, the portal automatically retries interactively.
 
 ## End-to-end test flow
 
@@ -148,6 +152,12 @@ Final approach:
 These are Entra/browser interstitials.
 - They often reduce after the first acceptance in the same browser profile.
 - To reduce “Stay signed in?” globally typically requires tenant-level configuration (KMSI prompt setting).
+
+### Microsoft “Pick an account” still appears
+This is usually caused by multiple Microsoft accounts being signed into the same browser profile.
+Mitigation for demos:
+- Use a fresh browser profile with only the target PoC user signed in.
+- Or sign out of other Microsoft accounts / clear Microsoft login cookies for that profile.
 
 ## Notes / Security
 - Do not commit secrets in `.env` in real environments.

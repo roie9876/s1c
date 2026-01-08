@@ -183,6 +183,11 @@ def entra_bootstrap():
     user_id = portal_to_avd.get(portal_key) or portal_user.get("userId")
     hint_user = mapped_avd_user or user_id
 
+    # We try a silent bootstrap first to avoid the Microsoft account picker when the user
+    # already has a valid session for the intended account in this browser profile.
+    # If Entra returns an interaction-required error, we fall back to an interactive bootstrap.
+    interactive = (request.args.get("interactive") or "").strip() == "1"
+
     state = uuid.uuid4().hex
     session["entra_bootstrap_state"] = state
     session["entra_bootstrap_next"] = next_url
@@ -195,6 +200,11 @@ def entra_bootstrap():
         "scope": "openid profile",
         "state": state,
     }
+
+    # Silent-first: only on the first attempt.
+    if not interactive and not session.get("entra_bootstrap_silent_tried"):
+        params["prompt"] = "none"
+        session["entra_bootstrap_silent_tried"] = True
     if hint_user and "@" in hint_user:
         params["login_hint"] = hint_user
         params["domain_hint"] = hint_user.split("@", 1)[1]
@@ -207,14 +217,33 @@ def entra_bootstrap():
 @app.route("/entra/callback")
 def entra_callback():
     """After Entra sign-in, forward the user to the AVD web client."""
-    expected_state = session.pop("entra_bootstrap_state", None)
-    next_url = session.pop("entra_bootstrap_next", None)
+    expected_state = session.get("entra_bootstrap_state")
+    next_url = session.get("entra_bootstrap_next")
     state = (request.args.get("state") or "").strip()
 
     if not expected_state or state != expected_state:
+        # Invalid/unknown callback; clear potentially stale state.
+        session.pop("entra_bootstrap_state", None)
+        session.pop("entra_bootstrap_next", None)
+        session.pop("entra_bootstrap_silent_tried", None)
         return "Invalid state", 400
 
-    # We don't need to redeem the code for this PoC; the purpose is to establish the browser session.
+    # If silent bootstrap failed due to needing interaction, retry interactively.
+    err = (request.args.get("error") or "").strip().lower()
+    if err in {"interaction_required", "login_required", "consent_required"}:
+        if not next_url:
+            return redirect(url_for("index"))
+        print(f"[PORTAL DEBUG] Entra bootstrap needs interaction ({err}); retrying interactive")
+        # Keep next_url in session; refresh state on retry.
+        session.pop("entra_bootstrap_state", None)
+        return redirect(url_for("entra_bootstrap", next=next_url, interactive="1"))
+
+    # Success path (or non-fatal callback). We don't redeem the code for this PoC;
+    # the purpose is to establish the browser session.
+    session.pop("entra_bootstrap_state", None)
+    session.pop("entra_bootstrap_next", None)
+    session.pop("entra_bootstrap_silent_tried", None)
+
     if not next_url:
         return redirect(url_for("index"))
 
