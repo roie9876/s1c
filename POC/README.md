@@ -48,6 +48,23 @@ A Python Flask web application that simulates both the Infinity Portal UI and th
 
 Optional (for demo): You can set `AVD_LAUNCH_URL` for the portal so clicking **Connect** redirects the browser to AVD Web.
 
+Optional (preferred for this PoC): configure direct launch for a specific RemoteApp by setting in `POC/LocalPortal/.env`:
+- `AVD_WORKSPACE_OBJECT_ID`
+- `AVD_REMOTEAPP_OBJECT_ID`
+
+#### AVD Web SSO behavior (important)
+
+In practice, the AVD Web Client (`client.wvd.microsoft.com`) initiates sign-in via MSAL against the `login.microsoftonline.com/common` endpoint.
+This can cause a username prompt even when passing `tenantId`/`login_hint` on the AVD URL.
+
+**Working approach in this PoC:** after a successful queue request, the portal shows a small helper page that:
+1. Boots a Microsoft session using the correct tenant + user hint (may show “Do you trust …” and “Stay signed in?” the first time).
+2. Opens the AVD Web Client (Smart Console).
+
+Configure these environment variables in `POC/LocalPortal/.env`:
+- `ENTRA_TENANT_ID` (tenant GUID / Directory ID)
+- Optional: `ENTRA_BOOTSTRAP_BASE_URL` (default: `https://myapplications.microsoft.com/`)
+
 ### 2. Azure Function (`/AzureFunction`) - *Optional for Local Test*
 Contains the Python code for the real Azure deployment.
 *   **Deploy:** Use VS Code Azure Functions extension or `func azure functionapp publish <APP_NAME>`.
@@ -150,6 +167,9 @@ If you want to mimic “Infinity Portal uses some SAML IdP” and then federate 
 
 - [POC/Keycloak/README.md](POC/Keycloak/README.md)
 
+Working end-to-end runbook (dated):
+- [POC/SSO_FEDERATION_RUNBOOK.md](POC/SSO_FEDERATION_RUNBOOK.md)
+
 ## Testing the Flow (Local Portal Method)
 
 1.  **Start the Portal:**
@@ -170,3 +190,8 @@ If you want to mimic “Infinity Portal uses some SAML IdP” and then federate 
     *   **PowerShell:** Should show `[SUCCESS] Connection request found.`.
     *   **SmartConsole:** Opens (no UI injection). Connection details are available via environment variables.
     *   **Troubleshooting:** If RemoteApp opens then closes immediately, verify the RemoteApp command line and that SmartConsole exists at the configured path.
+
+### 4. Automation (Deprecated)
+
+Legacy browser automation experiments were removed from this repo.
+Use the portal’s SSO bootstrap helper flow described above.

@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Launch Smart Console</title>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f4f4f4; padding: 20px; }
+        .container { max-width: 900px; margin: 0 auto; }
+        .card { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); margin-bottom: 20px; }
+        .btn { background-color: #007bff; color: white; padding: 10px 16px; text-decoration: none; border-radius: 4px; border: none; cursor: pointer; display: inline-block; }
+        .btn:hover { background-color: #0056b3; }
+        .btn-secondary { background-color: #6c757d; }
+        .btn-secondary:hover { background-color: #545b62; }
+        code { background: #f0f0f0; padding: 2px 6px; border-radius: 4px; }
+        .muted { color: #666; }
+        .alert { padding: 10px; margin-bottom: 15px; border-radius: 4px; background: #fff3cd; color: #856404; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="card">
+            <h2>Launch Smart Console</h2>
+            {% if auto_open %}
+                <div class="alert">
+                    Attempting one-click launch. If your browser blocks popups, use the buttons below.
+                </div>
+            {% endif %}
+            <p>
+                The AVD web client always starts sign-in via <code>/common</code>, which can force a username prompt.
+                The reliable workaround is to bootstrap a Microsoft session first, then open the AVD client.
+            </p>
+            <p class="muted">
+                Target user: <code>{{ upn }}</code>
+            </p>
+            <hr />
+            <p>
+                <b>Step 1 (SSO bootstrap)</b>: Sign in to Microsoft using the correct tenant context.
+            </p>
+            <p>
+                <a class="btn btn-secondary" href="{{ bootstrap_url }}" target="_blank" rel="noreferrer">Open Microsoft SSO</a>
+            </p>
+            <p class="muted">
+                You may see “Do you trust mydemodomain.org?” once. Click Continue.
+            </p>
+            <hr />
+            <p>
+                <b>Step 2</b>: Open the AVD web client (Smart Console).
+            </p>
+            <p>
+                <a class="btn" href="{{ avd_url }}" target="_blank" rel="noreferrer">Open Smart Console</a>
+            </p>
+            <p class="muted">
+                If the Smart Console tab was already opened before SSO completed, refresh it.
+            </p>
+        </div>
+    </div>
+
+    {% if auto_open %}
+    <script>
+        (function () {
+            // Best-effort: open bootstrap first (user may need to click through Trust/Stay signed in)
+            // then open Smart Console shortly after.
+            // Some browsers require popups to be directly triggered by a user gesture; if blocked,
+            // the user can use the buttons above.
+            try {
+                var w1 = window.open("{{ bootstrap_url }}", "_blank", "noopener,noreferrer");
+                if (w1 && w1.focus) w1.focus();
+            } catch (e) {
+                // ignored
+            }
+
+            window.setTimeout(function () {
+                try {
+                    var w2 = window.open("{{ avd_url }}", "_blank", "noopener,noreferrer");
+                    if (w2 && w2.focus) w2.focus();
+                } catch (e) {
+                    // ignored
+                }
+            }, 1200);
+        })();
+    </script>
+    {% endif %}
+</body>
+</html>

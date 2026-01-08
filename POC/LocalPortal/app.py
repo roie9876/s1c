@@ -8,6 +8,7 @@ from functools import wraps
 from dotenv import load_dotenv
 from authlib.integrations.flask_client import OAuth
 from urllib.parse import urlencode
+import urllib.parse
 
 # Load environment variables from .env file
 load_dotenv()
@@ -45,15 +46,10 @@ def _derive_user_id_from_claims(claims: dict) -> str:
 
 
 def _portal_user_key_from_claims(claims: dict) -> str:
-    # Stable identifier for the Infinity Portal user (Keycloak side).
-    # Prefer username so the user can keep any email address.
-    return (
-        claims.get("preferred_username")
-        or claims.get("email")
-        or claims.get("upn")
-        or claims.get("sub")
-        or ""
-    )
+    # We want to match the "key" in our JSON map.
+    # If the user is "cp1", preferred_username might be "cp1" or "cp1@gmail.com".
+    # For this POC, let's just return the 'preferred_username'.
+    return claims.get("preferred_username", "") or claims.get("sub", "")
 
 
 def _load_portal_to_avd_user_map() -> dict:
@@ -104,6 +100,125 @@ AZURE_FUNCTION_URL = os.getenv(
 # Optional: if set, after successfully queueing a request the portal will redirect the browser to this URL.
 # This enables a PoC demo of: click Connect -> AVD Web client opens.
 AVD_LAUNCH_URL = os.getenv("AVD_LAUNCH_URL", "").strip()
+
+# Optional (preferred for this PoC): launch a specific RemoteApp via the Windows 365/AVD web client.
+# This matches URLs like:
+#   https://windows.cloud.microsoft/webclient/avd/<workspaceObjectId>/<remoteAppObjectId>?tenant=<tenantGuid>
+# Set both IDs to enable.
+AVD_DIRECT_REMOTEAPP_BASE_URL = os.getenv(
+    "AVD_DIRECT_REMOTEAPP_BASE_URL",
+    "https://windows.cloud.microsoft/webclient/avd",
+).strip().rstrip("/")
+AVD_WORKSPACE_OBJECT_ID = os.getenv("AVD_WORKSPACE_OBJECT_ID", "").strip()
+AVD_REMOTEAPP_OBJECT_ID = os.getenv("AVD_REMOTEAPP_OBJECT_ID", "").strip()
+
+# Optional: if set, pins the Azure AD / Entra tenant for AVD sign-in flows.
+# IMPORTANT: use the tenant GUID (Directory ID), not the domain name.
+ENTRA_TENANT_ID = os.getenv("ENTRA_TENANT_ID", "").strip()
+
+# Optional: bootstrap URL to establish a Microsoft session in the browser.
+# The AVD web client tends to start MSAL via /common and may ignore hints; bootstrapping helps.
+ENTRA_BOOTSTRAP_BASE_URL = os.getenv(
+    "ENTRA_BOOTSTRAP_BASE_URL",
+    "https://myapplications.microsoft.com/",
+).strip()
+
+# Optional: a dedicated Entra "bootstrap" app registration (recommended for one-click).
+# Create an Entra App Registration (single tenant) and add a redirect URI:
+#   http://localhost:5001/entra/callback
+# Then set ENTRA_BOOTSTRAP_CLIENT_ID to that app's Application (client) ID.
+ENTRA_BOOTSTRAP_CLIENT_ID = os.getenv("ENTRA_BOOTSTRAP_CLIENT_ID", "").strip()
+ENTRA_BOOTSTRAP_REDIRECT_URI = os.getenv(
+    "ENTRA_BOOTSTRAP_REDIRECT_URI",
+    "http://localhost:5001/entra/callback",
+).strip()
+
+
+def _build_avd_launch_url(*, tenant_id: str, login_hint: str | None) -> str:
+    """Build the best AVD launch URL.
+
+    If RemoteApp IDs are configured, returns the direct RemoteApp URL.
+    Otherwise returns the generic AVD web client index URL.
+    """
+    safe_hint = None
+    if login_hint and "@" in login_hint:
+        # Keep this unescaped; urlencode() will apply escaping exactly once.
+        safe_hint = login_hint
+
+    if AVD_WORKSPACE_OBJECT_ID and AVD_REMOTEAPP_OBJECT_ID:
+        # Windows 365 / AVD web client direct RemoteApp deep link
+        base = f"{AVD_DIRECT_REMOTEAPP_BASE_URL}/{AVD_WORKSPACE_OBJECT_ID}/{AVD_REMOTEAPP_OBJECT_ID}"
+        # The direct-link format uses `tenant=` (per observed URLs).
+        qs = {"tenant": tenant_id}
+        if safe_hint:
+            qs["login_hint"] = safe_hint
+        return f"{base}?{urlencode(qs)}"
+
+    # Fallback: generic AVD web client index
+    qs = {"tenantId": tenant_id}
+    if safe_hint:
+        qs["login_hint"] = safe_hint
+    return f"https://client.wvd.microsoft.com/arm/webclient/index.html?{urlencode(qs)}"
+
+
+@app.route("/entra/bootstrap")
+@login_required
+def entra_bootstrap():
+    """Start an Entra sign-in to establish Microsoft session cookies, then return and forward to AVD."""
+    # We need an AVD URL to forward to after bootstrap.
+    next_url = (request.args.get("next") or "").strip()
+    if not next_url:
+        return "Missing next URL", 400
+
+    if not ENTRA_TENANT_ID:
+        return "ENTRA_TENANT_ID is not configured", 500
+    if not ENTRA_BOOTSTRAP_CLIENT_ID:
+        return "ENTRA_BOOTSTRAP_CLIENT_ID is not configured", 500
+
+    # Use mapped AVD user as login_hint when available.
+    mapped_avd_user = _get_mapped_avd_user()
+    portal_user = session.get("user", {})
+    portal_to_avd = _load_portal_to_avd_user_map()
+    portal_key = portal_user.get("portalUser")
+    user_id = portal_to_avd.get(portal_key) or portal_user.get("userId")
+    hint_user = mapped_avd_user or user_id
+
+    state = uuid.uuid4().hex
+    session["entra_bootstrap_state"] = state
+    session["entra_bootstrap_next"] = next_url
+
+    params = {
+        "client_id": ENTRA_BOOTSTRAP_CLIENT_ID,
+        "response_type": "code",
+        "redirect_uri": ENTRA_BOOTSTRAP_REDIRECT_URI,
+        "response_mode": "query",
+        "scope": "openid profile",
+        "state": state,
+    }
+    if hint_user and "@" in hint_user:
+        params["login_hint"] = hint_user
+        params["domain_hint"] = hint_user.split("@", 1)[1]
+
+    authorize_url = f"https://login.microsoftonline.com/{ENTRA_TENANT_ID}/oauth2/v2.0/authorize?{urlencode(params)}"
+    print(f"[PORTAL DEBUG] Entra bootstrap authorize: {authorize_url}")
+    return redirect(authorize_url)
+
+
+@app.route("/entra/callback")
+def entra_callback():
+    """After Entra sign-in, forward the user to the AVD web client."""
+    expected_state = session.pop("entra_bootstrap_state", None)
+    next_url = session.pop("entra_bootstrap_next", None)
+    state = (request.args.get("state") or "").strip()
+
+    if not expected_state or state != expected_state:
+        return "Invalid state", 400
+
+    # We don't need to redeem the code for this PoC; the purpose is to establish the browser session.
+    if not next_url:
+        return redirect(url_for("index"))
+
+    return redirect(next_url)
 
 # --- LOCAL LOG (To show history in UI) ---
 # Structure: { "userId": [ { request_obj }, ... ] }
@@ -322,8 +437,49 @@ def connect(customer_id):
     # Prepend to list
     REQUEST_HISTORY[user_id].insert(0, log_entry)
 
-    if status.startswith("SENT") and AVD_LAUNCH_URL:
-        return redirect(AVD_LAUNCH_URL)
+    if status.startswith("SENT") and (AVD_LAUNCH_URL or (AVD_WORKSPACE_OBJECT_ID and AVD_REMOTEAPP_OBJECT_ID)):
+        # Append login_hint to help Microsoft auto-select the federated user
+        target_url = AVD_LAUNCH_URL
+        # Ensure we use the MAPPED user (e.g. cp1@mydemodomain.org) not the portal user ID (cp1)
+        hint_user = mapped_avd_user or user_id
+        
+        if hint_user and "@" in hint_user:
+            # Extract domain
+            parts = hint_user.split("@")
+            domain_part = parts[1] if len(parts) > 1 else ""
+
+            # Prefer tenant GUID if configured; else fall back to a best-effort.
+            tenant_id = ENTRA_TENANT_ID or domain_part
+            avd_url = _build_avd_launch_url(tenant_id=tenant_id, login_hint=hint_user)
+
+            # Preferred: one-click flow via Entra bootstrap app (top-level navigation + callback).
+            # This avoids racing two tabs that both prompt for login.
+            if ENTRA_TENANT_ID and ENTRA_BOOTSTRAP_CLIENT_ID:
+                print(
+                    f"[PORTAL DEBUG] Redirecting to Entra bootstrap (tenantId={tenant_id}) then AVD={avd_url}"
+                )
+                return redirect(url_for("entra_bootstrap", next=avd_url))
+
+            # Fallback: helper page (works, but may require user to click through).
+            safe_hint = urllib.parse.quote(hint_user)
+            bootstrap_url = (
+                f"{ENTRA_BOOTSTRAP_BASE_URL}?tenantId={tenant_id}"
+                f"&login_hint={safe_hint}"
+            )
+
+            print(
+                f"[PORTAL DEBUG] Launch helper fallback (tenantId={tenant_id}) bootstrap={bootstrap_url} avd={avd_url}"
+            )
+
+            return render_template(
+                "avd_launch.html",
+                bootstrap_url=bootstrap_url,
+                avd_url=avd_url,
+                upn=hint_user,
+                auto_open=False,
+            )
+
+        return redirect(target_url)
 
     return redirect(url_for('index'))
 

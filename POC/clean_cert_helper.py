@@ -1,0 +1,15 @@
+import sys
+import re
+
+cert_raw = """MIIClTCCAX0CBgGbl0Kw5TANBgkqhkiG9w0BAQsFADAOMQwwCgYDVQQDDANzMWMwHhcNMjYwMTA3MDY1OTQ4WhcNMzYwMTA3MDcwMTI4WjAOMQwwCgYDVQQDDANzMWMwggEiMA0GCSqGSIb3DQEBAQUAA4IBDwAwggEKAoIBAQDUa61ZJbvdNhsU36Xdjhsk7jU8JO/5ftCfpSvPicMUr1NdArgyeYEL67WW4hy+/BimwSExXPIv/r7hvleRakGKAiqIfSL3WqnYOMqr/12wnLcZLeoNpKeSgBdWFUGimHedjpWpwH9BudA7bjyhEifFg/KFOWB3hTDK3uQie80mGfk+Xoy+lYp9N/HOhZfeY4JgFOUjrg/VF8oEBnGo9+b1xXJUpcE1LyvRQSeT5CmCxLVo6PxeTv+jbPrkV50dRSPF5SAraRtPH8NXySBxg3lfx1oHjCAicSh77VUXvpdNEr92AZ69bc8X99mfZ7Hk0ZZPa9yWkhpN7dCv0fhLPclLAgMBAAEwDQYJKoZIhvcNAQELBQADggEBAFDV7NCXLSb8tblhku/vxyBQ/xF2JRtEkQu0oOSMnmjXmyY4lh6gDcEYsGlgr7Tze663D/KcZiHzgTXuktypyf5sSOYho0mKbuksy++nOviwgzxQL3hQtOJgDfoAG2anJeiJqtQh7AnAqCR/AIkLAmYfALvAbZnAefnlnmUWXAdsinACSEVjPXJNewfbVqZ9oDa4kNy+66LzjPMy+1mRoD9B4pf6KnGrnOR/FUzS5fYEO7XZrIsIkTUirQ6zawINJ4DsSshPg5Ox93Wnv5wwx3pdJIEZG+1LZaYr1XvLBH7ZJTHX9h9d58DtMMWSotoKUxuxU2BUXDGAmMPgNlDm/iE="""
+
+def clean_cert(c):
+    # Remove headers if present (not expected here based on input above, but just in case)
+    c = re.sub(r'-----BEGIN CERTIFICATE-----', '', c)
+    c = re.sub(r'-----END CERTIFICATE-----', '', c)
+    # Remove any whitespaces/newlines
+    c = re.sub(r'\s+', '', c)
+    return c
+
+if __name__ == "__main__":
+    print(clean_cert(cert_raw))

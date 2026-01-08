@@ -92,7 +92,7 @@
                         <td>{{ cust.user }}</td>
                         <td>{{ cust.avdUserId or '-' }}</td>
                         <td>
-                            <form class="connect-form" action="/connect/{{ cust.id }}" method="POST">
+                            <form class="connect-form" action="/connect/{{ cust.id }}" method="POST" target="_blank" style="display:inline-block;">
                                 <input type="hidden" name="APPSTREAM_SESSION_CONTEXT" value="{{ appstream_session_context or '' }}" />
                                 <button type="submit" class="btn">Connect</button>
                             </form>

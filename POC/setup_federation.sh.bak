@@ -1,0 +1,63 @@
+#!/bin/bash
+
+# Configuration
+DOMAIN="mydemodomain.org"
+REALM="s1c"
+KEYCLOAK_URL="https://idp.mydemodomain.org/realms/$REALM/protocol/saml"
+ISSUER_URI="https://idp.mydemodomain.org/realms/$REALM"
+
+# -----------------------------------------------------------------------------
+# INSTRUCTION: Get your RS256 Certificate from Keycloak and paste it below.
+# 1. Login to Keycloak Admin Console
+# 2. Select realm 's1c'
+# 3. Go to 'Realm Settings' -> 'Keys' tab
+# 4. Find the 'RS256' row, click 'Certificate'
+# 5. Copy the content and paste it inside the quotes below variable.
+#    (Do not include -----BEGIN CERTIFICATE----- or newlines, just the base64 string)
+# -----------------------------------------------------------------------------
+SIGNING_CERT="PASTE_YOUR_CERTIFICATE_STRING_HERE"
+
+if [ "$SIGNING_CERT" == "MIIClTCCAX0CBgGbl0Kw5TANBgkqhkiG9w0BAQsFADAOMQwwCgYDVQQDDANzMWMwHhcNMjYwMTA3MDY1OTQ4WhcNMzYwMTA3MDcwMTI4WjAOMQwwCgYDVQQDDANzMWMwggEiMA0GCSqGSIb3DQEBAQUAA4IBDwAwggEKAoIBAQDUa61ZJbvdNhsU36Xdjhsk7jU8JO/5ftCfpSvPicMUr1NdArgyeYEL67WW4hy+/BimwSExXPIv/r7hvleRakGKAiqIfSL3WqnYOMqr/12wnLcZLeoNpKeSgBdWFUGimHedjpWpwH9BudA7bjyhEifFg/KFOWB3hTDK3uQie80mGfk+Xoy+lYp9N/HOhZfeY4JgFOUjrg/VF8oEBnGo9+b1xXJUpcE1LyvRQSeT5CmCxLVo6PxeTv+jbPrkV50dRSPF5SAraRtPH8NXySBxg3lfx1oHjCAicSh77VUXvpdNEr92AZ69bc8X99mfZ7Hk0ZZPa9yWkhpN7dCv0fhLPclLAgMBAAEwDQYJKoZIhvcNAQELBQADggEBAFDV7NCXLSb8tblhku/vxyBQ/xF2JRtEkQu0oOSMnmjXmyY4lh6gDcEYsGlgr7Tze663D/KcZiHzgTXuktypyf5sSOYho0mKbuksy++nOviwgzxQL3hQtOJgDfoAG2anJeiJqtQh7AnAqCR/AIkLAmYfALvAbZnAefnlnmUWXAdsinACSEVjPXJNewfbVqZ9oDa4kNy+66LzjPMy+1mRoD9B4pf6KnGrnOR/FUzS5fYEO7XZrIsIkTUirQ6zawINJ4DsSshPg5Ox93Wnv5wwx3pdJIEZG+1LZaYr1XvLBH7ZJTHX9h9d58DtMMWSotoKUxuxU2BUXDGAmMPgNlDm/iE=" ]; then
+    echo "Error: You must paste your Keycloak RS256 Certificate into the script first."
+    exit 1
+fi
+
+echo "Configuring Federation for $DOMAIN to use Keycloak realm $REALM..."
+
+# We use the Microsoft Graph API via 'az rest' because MSOnline PowerShell doesn't run on macOS/Linux.
+# Reference: https://learn.microsoft.com/graph/api/internaldomainfederation-update
+
+# 1. Check if federation config exists (and delete it if needed, to be clean)
+# Note: Usually we perform a POST to create. If it exists, we might need PATCH.
+# For simplicity in this PoC script, we assume we are converting 'Managed' -> 'Federated'.
+
+json_payload=$(cat <<EOF
+{
+  "@odata.type": "#microsoft.graph.internalDomainFederation",
+  "issuerUri": "$ISSUER_URI",
+  "passiveSignInUri": "$KEYCLOAK_URL",
+  "preferredAuthenticationProtocol": "saml",
+  "signingCertificate": "$CLEANERT",
+  "activeSignInUri": "$KEYCLOAK_URL",
+  "signOutUri": "$KEYCLOAK_URL",
+  "displayName": "Keycloak-Federation",
+  "isSignedAuthenticationRequestRequired": false,
+  "nextSigningCertificate": ""
+}
+EOF
+)
+
+echo "Sending request to Microsoft Graph..."
+
+az rest --method POST \
+  --uri "https://graph.microsoft.com/v1.0/domains/$DOMAIN/federationConfiguration" \
+  --body "$json_payload" \
+  --headers "Content-Type=application/json"
+
+if [ $? -eq 0 ]; then
+    echo ""
+    echo "SUCCESS: Domain $DOMAIN is now federated to Keycloak ($REALM)."
+else
+    echo ""
+    echo "FAILED. See error above."
+fi
