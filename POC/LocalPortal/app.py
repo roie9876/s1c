@@ -286,17 +286,46 @@ def set_context():
     return redirect(url_for('index'))
 
 
-@app.route('/login')
+@app.route('/login', methods=['GET', 'POST'])
 def login():
+    if session.get("user"):
+        return redirect(url_for("index"))
+
     if not (KEYCLOAK_ISSUER_URL and KEYCLOAK_CLIENT_ID and KEYCLOAK_REDIRECT_URI):
         return (
             "Keycloak OIDC is not configured. Set KEYCLOAK_ISSUER_URL, KEYCLOAK_CLIENT_ID, KEYCLOAK_REDIRECT_URI.",
             500,
         )
 
+    # Show a branded login landing page (PoC) then continue into Keycloak.
+    if request.method == 'GET':
+        # Optional: support a 'provider' selector on the landing page.
+        provider = (request.args.get('provider') or '').strip().lower()
+        if provider:
+            session['login_provider'] = provider
+        return render_template(
+            'login.html',
+            email=(session.get('login_email') or ''),
+            region=(session.get('login_region') or 'US-EU'),
+        )
+
+    # POST: capture input from landing page.
+    email = (request.form.get('email') or '').strip()
+    region = (request.form.get('region') or 'US-EU').strip()
+    session['login_email'] = email
+    session['login_region'] = region
+
     keycloak = oauth.create_client("keycloak")
     # Force showing the login screen so switching users works even when a Keycloak SSO session exists.
-    return keycloak.authorize_redirect(KEYCLOAK_REDIRECT_URI, prompt="login", max_age="0")
+    extra = {"prompt": "login", "max_age": "0"}
+    if email:
+        extra["login_hint"] = email
+    provider = (session.get('login_provider') or '').strip().lower()
+    if provider:
+        # Keycloak supports selecting an identity provider via `kc_idp_hint`.
+        extra["kc_idp_hint"] = provider
+
+    return keycloak.authorize_redirect(KEYCLOAK_REDIRECT_URI, **extra)
 
 
 @app.route('/auth/callback')

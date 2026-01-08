@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Infinity Portal (PoC)</title>
+    <style>
+        :root {
+            --bg: #f4f4f4;
+            --card: #ffffff;
+            --text: #222;
+            --muted: #6c757d;
+            --border: #e5e5e5;
+            --primary: #2b3b55;
+        }
+
+        body {
+            margin: 0;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+        }
+
+        .page {
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 24px;
+        }
+
+        .shell {
+            width: 100%;
+            max-width: 1040px;
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            overflow: hidden;
+            display: grid;
+            grid-template-columns: 1.1fr 0.9fr;
+        }
+
+        .left {
+            padding: 36px;
+        }
+
+        .brand {
+            font-weight: 700;
+            letter-spacing: 0.08em;
+            font-size: 18px;
+        }
+
+        .title {
+            margin-top: 32px;
+            font-size: 22px;
+            font-weight: 500;
+            color: var(--muted);
+        }
+
+        .field {
+            margin-top: 18px;
+        }
+
+        label {
+            display: block;
+            font-size: 12px;
+            color: var(--muted);
+            margin-bottom: 6px;
+        }
+
+        input, select {
+            width: 100%;
+            padding: 10px 12px;
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            font-size: 14px;
+            outline: none;
+        }
+
+        input:focus, select:focus {
+            border-color: #c7c7c7;
+        }
+
+        .btn {
+            margin-top: 22px;
+            width: 100%;
+            background: var(--primary);
+            color: white;
+            padding: 10px 12px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+
+        .btn:hover {
+            filter: brightness(0.95);
+        }
+
+        .divider {
+            margin: 18px 0;
+            display: grid;
+            grid-template-columns: 1fr auto 1fr;
+            gap: 12px;
+            align-items: center;
+            color: var(--muted);
+            font-size: 12px;
+        }
+
+        .divider::before,
+        .divider::after {
+            content: "";
+            height: 1px;
+            background: var(--border);
+        }
+
+        .btn-secondary {
+            width: 100%;
+            background: #f1f3f5;
+            color: #111;
+            padding: 10px 12px;
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+
+        .fineprint {
+            margin-top: 10px;
+            font-size: 12px;
+            color: var(--muted);
+        }
+
+        .links {
+            margin-top: 22px;
+            font-size: 13px;
+        }
+
+        .links a {
+            color: #1a73e8;
+            text-decoration: none;
+        }
+
+        .links a:hover {
+            text-decoration: underline;
+        }
+
+        .right {
+            background: #fafafa;
+            border-left: 1px solid var(--border);
+            padding: 36px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+        }
+
+        .right .panel {
+            width: 100%;
+            max-width: 320px;
+        }
+
+        .right .panel h2 {
+            margin: 0;
+            font-size: 18px;
+            font-weight: 600;
+            color: #444;
+        }
+
+        .right .panel p {
+            margin-top: 10px;
+            font-size: 13px;
+            color: var(--muted);
+            line-height: 1.5;
+        }
+
+        @media (max-width: 860px) {
+            .shell {
+                grid-template-columns: 1fr;
+            }
+            .right {
+                display: none;
+            }
+        }
+    </style>
+</head>
+<body>
+<div class="page">
+    <div class="shell">
+        <div class="left">
+            <div class="brand">INFINITY PORTAL</div>
+
+            <div class="title">MY ACCOUNT</div>
+
+            <form method="POST" action="/login" autocomplete="off">
+                <div class="field">
+                    <label for="email">Email</label>
+                    <input id="email" name="email" type="email" placeholder="name@company.com" value="{{ email or '' }}" required />
+                </div>
+
+                <div class="field">
+                    <label for="region">Region</label>
+                    <select id="region" name="region">
+                        <option value="US-EU" {% if region == 'US-EU' %}selected{% endif %}>US - EU</option>
+                        <option value="US" {% if region == 'US' %}selected{% endif %}>US</option>
+                        <option value="EU" {% if region == 'EU' %}selected{% endif %}>EU</option>
+                    </select>
+                </div>
+
+                <button type="submit" class="btn">NEXT</button>
+
+                <div class="divider">OR</div>
+
+                <button type="button" class="btn-secondary" onclick="window.location.href='/login?provider=github'">
+                    Log in with GitHub
+                </button>
+
+                <div class="fineprint">Login with your work email. Private accounts are not supported (PoC text).</div>
+
+                <div class="links">
+                    <div><a href="#" onclick="return false;">Don't have an account? Register here</a></div>
+                    <div style="margin-top: 8px;"><span style="color: var(--muted);">Trouble logging in?</span> <a href="#" onclick="return false;">Click here</a></div>
+                </div>
+            </form>
+        </div>
+
+        <div class="right">
+            <div class="panel">
+                <h2>Infinity Portal</h2>
+                <p>
+                    This is a PoC login landing page. Clicking NEXT starts the configured Keycloak OIDC sign-in,
+                    then you will see the Connect experience.
+                </p>
+            </div>
+        </div>
+    </div>
+</div>
+</body>
+</html>

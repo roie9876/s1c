@@ -5,54 +5,190 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Infinity Portal Simulator (PoC)</title>
     <style>
-        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f4f4f4; padding: 20px; }
-        .container { max-width: 900px; margin: 0 auto; }
-        h1 { color: #e83e8c; } /* Check Point Pink-ish */
-        
-        .card { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); margin-bottom: 20px; }
-        
-        table { width: 100%; border-collapse: collapse; margin-top: 10px; }
-        th, td { text-align: left; padding: 12px; border-bottom: 1px solid #ddd; }
-        th { background-color: #333; color: white; }
-        
-        .btn { background-color: #007bff; color: white; padding: 8px 16px; text-decoration: none; border-radius: 4px; border: none; cursor: pointer; }
-        .btn:hover { background-color: #0056b3; }
-        
-        .alert { padding: 10px; margin-bottom: 15px; border-radius: 4px; }
-        .alert-success { background-color: #d4edda; color: #155724; }
-        .alert-error { background-color: #f8d7da; color: #721c24; }
+        :root {
+            --bg: #f4f4f4;
+            --card: #ffffff;
+            --text: #222;
+            --muted: #6c757d;
+            --border: #e5e5e5;
+            --primary: #2b3b55;
+        }
 
-        .refresh-btn { float: right; background-color: #6c757d; }
+        body {
+            margin: 0;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: var(--bg);
+            color: var(--text);
+        }
+
+        .page {
+            min-height: 100vh;
+            padding: 24px;
+        }
+
+        .container {
+            max-width: 1040px;
+            margin: 0 auto;
+        }
+
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 16px;
+        }
+
+        .brand {
+            font-weight: 700;
+            letter-spacing: 0.08em;
+            font-size: 18px;
+        }
+
+        .subtitle {
+            margin-top: 8px;
+            color: var(--muted);
+            font-size: 13px;
+            line-height: 1.4;
+        }
+
+        .card {
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            padding: 18px;
+            margin-bottom: 16px;
+        }
+
+        .card h2 {
+            margin: 0 0 10px 0;
+            font-size: 18px;
+            font-weight: 600;
+            color: #444;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 8px;
+        }
+
+        th, td {
+            text-align: left;
+            padding: 12px;
+            border-bottom: 1px solid var(--border);
+            vertical-align: middle;
+        }
+
+        th {
+            background-color: var(--primary);
+            color: white;
+            font-weight: 600;
+            font-size: 13px;
+        }
+
+        input[type="text"] {
+            padding: 10px 12px;
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            font-size: 14px;
+            outline: none;
+        }
+
+        input[type="text"]:focus {
+            border-color: #c7c7c7;
+        }
+
+        .btn {
+            background-color: var(--primary);
+            color: white;
+            padding: 10px 14px;
+            text-decoration: none;
+            border-radius: 4px;
+            border: none;
+            cursor: pointer;
+            font-size: 14px;
+        }
+
+        .btn:hover {
+            filter: brightness(0.95);
+        }
+
+        .btn-secondary {
+            background: #f1f3f5;
+            color: #111;
+            border: 1px solid var(--border);
+        }
+
+        .alert {
+            padding: 10px 12px;
+            margin-bottom: 12px;
+            border-radius: 4px;
+            border: 1px solid var(--border);
+        }
+
+        .alert-success { background-color: #e7f6ea; color: #155724; }
+        .alert-error { background-color: #fdebec; color: #721c24; }
+
+        .row {
+            display: flex;
+            gap: 12px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+
+        .grow { flex: 1 1 auto; }
+
+        .meta {
+            color: var(--muted);
+            font-size: 13px;
+            line-height: 1.4;
+        }
+
+        .divider {
+            border-top: 1px solid var(--border);
+            margin: 12px 0;
+        }
     </style>
 </head>
 <body>
-    <div class="container">
-        <h1>Infinity Portal Simulator</h1>
-        <p>This local app simulates the <b>Infinity Portal</b>. Clicking "Connect" sends a request to the <b>Real Azure Function</b>.</p>
+    <div class="page">
+        <div class="container">
+            <div class="header">
+                <div>
+                    <div class="brand">INFINITY PORTAL</div>
+                    <div class="subtitle">Portal simulator (PoC). Clicking <b>Connect</b> queues a request to the broker and launches the published RemoteApp.</div>
+                </div>
+            </div>
 
         <div class="card">
             {% if current_user %}
-                <b>Signed in as:</b> {{ current_user.name }} ({{ current_user.portalUser or current_user.userId }})
+                <div class="row">
+                    <div class="grow">
+                        <div><b>Signed in as:</b> {{ current_user.name }} ({{ current_user.portalUser or current_user.userId }})</div>
                 {% if mapped_avd_user %}
-                    <br />
-                    <b>Queues as AVD user:</b> {{ mapped_avd_user }}
+                        <div class="meta"><b>Queues as AVD user:</b> {{ mapped_avd_user }}</div>
                 {% endif %}
-                <hr />
-                <form action="/set_context" method="POST" style="margin:0; display:inline-block; width: 75%;">
-                    <label for="APPSTREAM_SESSION_CONTEXT"><b>APPSTREAM_SESSION_CONTEXT</b></label>
-                    <input
-                        id="APPSTREAM_SESSION_CONTEXT"
-                        name="APPSTREAM_SESSION_CONTEXT"
-                        type="text"
-                        value="{{ appstream_session_context or '' }}"
-                        style="width: 65%; padding: 6px 10px; margin-left: 10px;"
-                        placeholder="Enter session context"
-                        required
-                    />
-                    <button type="submit" class="btn" style="margin-left: 10px;">Save</button>
-                </form>
-                <form action="/logout" method="GET" style="display:inline; float:right;">
-                    <button type="submit" class="btn refresh-btn">Logout</button>
+                    </div>
+                    <form action="/logout" method="GET">
+                        <button type="submit" class="btn btn-secondary">Logout</button>
+                    </form>
+                </div>
+                <div class="divider"></div>
+                <form action="/set_context" method="POST" style="margin:0;">
+                    <div class="row">
+                        <div style="min-width: 220px;"><b>APPSTREAM_SESSION_CONTEXT</b></div>
+                        <input
+                            id="APPSTREAM_SESSION_CONTEXT"
+                            name="APPSTREAM_SESSION_CONTEXT"
+                            type="text"
+                            value="{{ appstream_session_context or '' }}"
+                            style="min-width: 260px; flex: 1 1 420px;"
+                            placeholder="Enter session context"
+                            required
+                        />
+                        <button type="submit" class="btn">Save</button>
+                    </div>
                 </form>
             {% else %}
                 <b>Not signed in.</b>
@@ -126,10 +262,12 @@
 
         <!-- LOCAL HISTORY -->
         <div class="card">
-            <h2>Request History (Local Log)</h2>
-            <form action="/reset" method="POST" style="display:inline;">
-                <button type="submit" class="btn refresh-btn">Clear Log</button>
-            </form>
+            <div class="row" style="justify-content: space-between;">
+                <h2 style="margin:0;">Request History (Local Log)</h2>
+                <form action="/reset" method="POST" style="margin:0;">
+                    <button type="submit" class="btn btn-secondary">Clear Log</button>
+                </form>
+            </div>
             
             {% for user, requests in history.items() %}
                 <h3>User: {{ user }}</h3>
@@ -154,6 +292,7 @@
             {% else %}
                 <p>No requests sent yet.</p>
             {% endfor %}
+        </div>
         </div>
     </div>
 </body>
